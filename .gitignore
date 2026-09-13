@@ -1,0 +1,15 @@
+# colcon workspace build artifacts (this repo is meant to sit under a
+# workspace's src/ - these directories belong at the workspace root, not
+# here, but are ignored defensively in case colcon is ever run from here)
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor/OS cruft
+.vscode/
+*.swp
+.DS_Store
