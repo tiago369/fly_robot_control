@@ -1,0 +1,88 @@
+<library path="fly_brain">
+  <class name="fly_brain/HaltereReflexController"
+         type="fly_brain::HaltereReflexController"
+         base_class_type="controller_interface::ChainableControllerInterface">
+    <description>
+      M2 haltere-analog reflex controller: fly_brain::ComplementaryFilter ->
+      fly_brain::HaltereReflex (outer P attitude loop -> inner PD rate loop
+      against raw gyro) -> QuadMixer thrust allocation. Claims thrust1..4/effort
+      command interfaces and the imu/* state interfaces. Chainable: exports
+      "roll"/"pitch"/"yaw_rate"/"thrust" reference interfaces for a future
+      DescendingFusionController (M4) to write; standalone (not chained) mode
+      sources a fixed level-attitude-hold setpoint from its own parameters.
+      M3 optionally adds ONE extra claimed command interface (parameter-
+      controlled, off by default) sourced from OpticFlowController's exported
+      reference interfaces, additively modulating the effective yaw-rate
+      setpoint as a standalone preview of M4's optomotor fusion term.
+      Note: controller_manager loads chainable controllers via a separate
+      pluginlib ClassLoader templated on controller_interface::ChainableControllerInterface
+      from plain controller_interface::ControllerInterface ones (see NOTES.md's
+      "## M2" section) - base_class_type here must be
+      "controller_interface::ChainableControllerInterface", NOT
+      "controller_interface::ControllerInterface" as fly_controller_plugins.xml
+      uses for the (non-chainable) M1 BaselinePidController.
+    </description>
+  </class>
+  <class name="fly_brain/OpticFlowController"
+         type="fly_brain::OpticFlowController"
+         base_class_type="controller_interface::ChainableControllerInterface">
+    <description>
+      M3 optic-flow-analog visual reflex controller: downsamples
+      /drone/camera/image_raw to a coarse grayscale grid and feeds
+      fly_brain::ReichardtEmdArray (Hassenstein-Reichardt elementary-motion-
+      detector array with antisymmetric/symmetric LPTC-style spatial
+      pooling). Claims no hardware command or state interfaces at all (pure
+      perception, topic-driven only). Chainable: exports
+      yaw_rate/roll_drift/forward_drift/vertical_drift reference interfaces,
+      matching fly_brain::OpticFlowEstimate's fields, for
+      HaltereReflexController (this milestone) and a future
+      DescendingFusionController (M4) to consume. See NOTES.md's "## M3"
+      section for a real naming gotcha: despite the field name, "yaw_rate" is
+      not the field that tracks camera yaw rotation - "forward_drift" is
+      (confirmed by an analytic ground-truth bench comparing pooled output
+      against known egomotion).
+    </description>
+  </class>
+  <class name="fly_brain/DescendingFusionController"
+         type="fly_brain::DescendingFusionController"
+         base_class_type="controller_interface::ChainableControllerInterface">
+    <description>
+      M4 descending-fusion controller: the top of the fly-brain chain.
+      Claims HaltereReflexController's exported roll/pitch/yaw_rate/thrust
+      reference interfaces as its own command interfaces, and optionally
+      OpticFlowController's chosen reference interface the same way
+      (superseding HaltereReflexController's own M3 optic-flow bolt-on).
+      Runs a real closed-loop altitude PID against /drone/free_joint_states
+      (topic, not a hardware interface), composes a fixed parameter-sourced
+      task command, and calls fly_brain::DescendingFusion::fuse() to produce
+      the fused attitude/thrust setpoint written into HaltereReflexController's
+      claimed interfaces every cycle. Exports no reference interfaces of its
+      own (it is the top of the chain, not a middle layer). Same
+      base-class-type caveat as the other two fly_brain controllers above:
+      controller_manager loads chainable controllers via a separate pluginlib
+      ClassLoader from plain ControllerInterface ones, so base_class_type
+      here must be controller_interface::ChainableControllerInterface.
+    </description>
+  </class>
+  <class name="fly_brain/PhototaxisController"
+         type="fly_brain::PhototaxisController"
+         base_class_type="controller_interface::ChainableControllerInterface">
+    <description>
+      M5 phototaxis-analog visual-target-seeking controller: runs
+      fly_brain::ColorBlobDetector (a per-pixel color threshold + centroid,
+      a DIFFERENT algorithm from OpticFlowController's motion-based Reichardt
+      EMD array) on /drone/camera/image_raw to find a bright, saturated
+      attractant target by its static color/appearance rather than its
+      motion. Claims no hardware command or state interfaces at all (pure
+      perception, topic-driven only, same shape as OpticFlowController).
+      Chainable: exports target_visible/bearing/area_fraction reference
+      interfaces for DescendingFusionController to consume and turn into a
+      turn-toward/approach task command.
+      Same base-class-type caveat as the other fly_brain controllers:
+      controller_manager loads chainable controllers via a separate
+      pluginlib ClassLoader from plain ControllerInterface ones, so
+      base_class_type here must be
+      controller_interface::ChainableControllerInterface.
+    </description>
+  </class>
+</library>
