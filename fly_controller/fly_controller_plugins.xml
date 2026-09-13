@@ -1,0 +1,12 @@
+<library path="fly_controller">
+  <class name="fly_controller/BaselinePidController"
+         type="fly_controller::BaselinePidController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      M1 baseline (non-bio-inspired) PID hover controller: altitude PID ->
+      attitude P -> rate PD (fly_brain::CascadedPid) -> QuadMixer thrust
+      allocation. Claims thrust1..4/effort command interfaces and the imu/*
+      state interfaces; subscribes to /drone/free_joint_states for altitude.
+    </description>
+  </class>
+</library>
