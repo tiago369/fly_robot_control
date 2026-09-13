@@ -1,0 +1,39 @@
+/**:
+  ros__parameters:
+    mujoco_plugins:
+      # M6: full copy of mujoco_ros2_control_plugins.yaml (see that file for
+      # the per-plugin rationale, unchanged here) with exactly ONE difference:
+      # body_names below also lists "attractant_target" (M6's free-jointed
+      # target sphere - see models/skydio_x2/drone_scene_m6.xml). This is a
+      # SEPARATE file, not an edit to the shared mujoco_ros2_control_plugins.yaml,
+      # because FreeJointStatePublisherPlugin::collect_free_joint_entries()
+      # hard-fails init() ("body_names entry '...' is not a body driven by a
+      # free joint in this MuJoCo model") if a listed name isn't a real
+      # free-joint body in the LOADED model - and "attractant_target" is only
+      # a free-joint body under drone_scene_m6.xml, not M1-M5's
+      # drone_scene.xml (where it's a fixed/static body with no joint at
+      # all). Reusing the shared file with the target added would have broken
+      # M1-M5 activation outright. Order matters for consumers that index
+      # free_joints[0] as the drone (e.g. brain_activity_monitor.py,
+      # descending_fusion_controller.cpp): "x2" stays first.
+      free_joint_state_publisher:
+        type: "mujoco_ros2_control_plugins/FreeJointStatePublisherPlugin"
+        frame_id: ""
+        body_names: ["x2", "attractant_target"]
+        topic: "/drone/free_joint_states"
+        publish_rate: 50.0
+
+      mujoco_camera_plugin:
+        type: "mujoco_ros2_control_plugins/CameraPlugin"
+        camera_publish_rate: 15.0
+        track:
+          policy: disabled
+        nose_cam:
+          policy: streaming
+          frame_name: x2_camera_frame
+          info_topic: /drone/camera/camera_info
+          image_topic: /drone/camera/image_raw
+          depth_topic: /drone/camera/depth/image_raw
+
+      external_wrench:
+        type: "mujoco_ros2_control_plugins/ExternalWrenchPlugin"
