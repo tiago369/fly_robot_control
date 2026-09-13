@@ -192,6 +192,22 @@ private:
   // gate-chattering that destabilized the whole stack, a real regression.
   double optic_flow_altitude_gate_ = 0.1;
 
+  // Post-M4 fix (see NOTES.md's "## Post-M4" yaw-disturbance-regression
+  // section): the hard on/off gate above still let a residual climb-transient
+  // burst through at full k_optomotor strength the instant it first opened,
+  // producing the ~45-56deg startup yaw-spin residual. Rather than adding a
+  // SECOND hard threshold condition (the |z_dot| gate above, already tried
+  // and rejected for chattering), this ramps the flow correction's effective
+  // strength linearly from 0 to 1 over optic_flow_gate_ramp_duration_ seconds
+  // AFTER the altitude gate first opens. This is monotonic and one-shot (once
+  // latched open it never re-closes and the ramp only counts up), so it
+  // cannot chatter the way a second AND-gated threshold on a noisy signal
+  // did - it changes how HARD the existing gate opens, not whether a second
+  // condition also has to be true.
+  double optic_flow_gate_ramp_duration_ = 1.0;
+  bool optic_flow_gate_opened_ = false;
+  double time_since_gate_open_ = 0.0;
+
   // M5: optional chained phototaxis input (fly_brain::PhototaxisController) -
   // a real vision-based target-seeking task-command source, layered at the
   // SAME level as the fixed forward_pitch_setpoint_/yaw_rate_setpoint_

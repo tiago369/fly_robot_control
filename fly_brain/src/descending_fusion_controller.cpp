@@ -70,6 +70,9 @@ CallbackReturn DescendingFusionController::on_init() {
     // real bug found during M4 verification, not speculative hardening.
     optic_flow_altitude_gate_ =
         auto_declare<double>("optic_flow_altitude_gate", optic_flow_altitude_gate_);
+    // Post-M4 fix - see header comment on optic_flow_gate_ramp_duration_.
+    optic_flow_gate_ramp_duration_ =
+        auto_declare<double>("optic_flow_gate_ramp_duration", optic_flow_gate_ramp_duration_);
 
     // M5: optional chained phototaxis (color-target-seeking) input - see
     // header comment and descending_fusion_controller.hpp's own member
@@ -117,6 +120,8 @@ CallbackReturn DescendingFusionController::on_configure(
   have_z_ = false;
   z_integral_ = 0.0;
   prev_err_z_ = 0.0;
+  optic_flow_gate_opened_ = false;
+  time_since_gate_open_ = 0.0;
   free_joint_state_sub_ = get_node()->create_subscription<FreeJointStateArray>(
       "/drone/free_joint_states", rclcpp::SystemDefaultsQoS(),
       std::bind(&DescendingFusionController::free_joint_state_callback, this,
@@ -148,6 +153,8 @@ CallbackReturn DescendingFusionController::on_activate(
   have_z_ = false;
   z_integral_ = 0.0;
   prev_err_z_ = 0.0;
+  optic_flow_gate_opened_ = false;
+  time_since_gate_open_ = 0.0;
   return CallbackReturn::SUCCESS;
 }
 
@@ -265,10 +272,30 @@ controller_interface::return_type DescendingFusionController::update_and_write_c
   // The single-condition altitude-error gate below doesn't chatter (err_z
   // decreases monotonically during the one-time climb, so the gate opens
   // exactly once and stays open) and is what's actually shipped.
+  // Post-M4 fix (see header comment on optic_flow_gate_ramp_duration_ and
+  // NOTES.md's "## Post-M4" section): the gate above still let the full
+  // correction through the instant it first opened, which is what produced
+  // the ~45-56deg startup yaw-spin residual (a real climb-transient burst
+  // still present right at the gate-open instant, just below the altitude
+  // threshold). Latch the gate open (never re-close it - err_z decreases
+  // monotonically during the one-time climb, so it opens exactly once) and
+  // ramp the correction's effective strength linearly from 0 to 1 over the
+  // following optic_flow_gate_ramp_duration_ seconds, instead of jumping
+  // straight to full strength.
   double flow_signal = 0.0;
-  if (use_optic_flow_input_ && command_interfaces_.size() > kNumHaltereInterfaces &&
-      std::abs(err_z) < optic_flow_altitude_gate_) {
-    flow_signal = command_interfaces_[kNumHaltereInterfaces].get_optional<double>().value_or(0.0);
+  if (use_optic_flow_input_ && command_interfaces_.size() > kNumHaltereInterfaces) {
+    if (!optic_flow_gate_opened_ && std::abs(err_z) < optic_flow_altitude_gate_) {
+      optic_flow_gate_opened_ = true;
+      time_since_gate_open_ = 0.0;
+    }
+    if (optic_flow_gate_opened_) {
+      time_since_gate_open_ += dt;
+      const double ramp = optic_flow_gate_ramp_duration_ > 0.0
+                               ? std::min(1.0, time_since_gate_open_ / optic_flow_gate_ramp_duration_)
+                               : 1.0;
+      flow_signal =
+          ramp * command_interfaces_[kNumHaltereInterfaces].get_optional<double>().value_or(0.0);
+    }
   }
 
   fly_brain::TaskCommand task;
