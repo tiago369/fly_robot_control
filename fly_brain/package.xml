@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>fly_brain</name>
+  <version>0.0.1</version>
+  <description>
+    Bio-inspired fly-brain controllers (haltere gyro reflex, optic-flow visual
+    reflex, descending fusion). Ships a header-only, synthetic-input-tested
+    algorithm library (mixer, complementary filter, haltere reflex law,
+    Reichardt EMD + LPTC pooling, baseline cascaded-PID math, descending
+    fusion law) consumed by fly_controller's BaselinePidController (M1) and,
+    from M2 onward, by this package's own pluginlib-exported ros2_control
+    chainable controller plugins (not yet implemented).
+  </description>
+  <maintainer email="tiagobarreto581@gmail.com">Tiago Barreto</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <depend>controller_interface</depend>
+  <depend>hardware_interface</depend>
+  <depend>pluginlib</depend>
+  <depend>realtime_tools</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>mujoco_ros2_control_msgs</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

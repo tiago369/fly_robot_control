@@ -1,0 +1,76 @@
+<!--
+  M6 scene variant - see NOTES.md's "## M6" section for the full story.
+
+  Identical to drone_scene.xml (M5's phototaxis scene) EXCEPT the
+  "attractant_target" body gets a <freejoint/> (M5's version has NO joint -
+  it's welded to the world at a fixed pos, which cannot be moved at runtime).
+  A separate file rather than editing drone_scene.xml in place, so M1-M5's
+  launches (which reference drone_scene.xml directly via drone.urdf.xacro's
+  hardware `mujoco_model` param) are completely unaffected - confirmed by
+  re-running m5_phototaxis.launch.py unchanged after adding this file (see
+  NOTES.md).
+
+  Why a free joint doesn't just make the sphere fall through the floor or
+  drift: the body has `gravcomp="1"` (exactly cancels gravity for this body,
+  standard MuJoCo mechanism - see the <body> element below) AND keeps the
+  original `contype="0" conaffinity="0"` (no collision with the ground plane
+  or the drone). With gravity cancelled, no collision forces, and no other
+  forces ever applied to it, a free-jointed body starting at rest (qvel=0)
+  stays EXACTLY at rest indefinitely - MuJoCo only integrates qvel from
+  applied forces/torques, and there are none here between teleports. This is
+  the "kinematically parked, only actually moved by teleport calls" scheme
+  NOTES.md's brief called for, verified empirically (see NOTES.md: several
+  seconds of /drone/free_joint_states samples with the target untouched show
+  zero position drift and exactly-zero twist).
+
+  The `set_free_joint_state` service (mujoco_ros2_control_msgs/srv/
+  SetFreeJointState) is what actually moves it - see moving_target.py and
+  NOTES.md's "## M6" section for the exact call. Every teleport call also
+  writes qvel=0 (the service defaults unset twist to zero), so even if some
+  future change gave this body a nonzero velocity, each teleport re-parks it
+  cleanly rather than accumulating drift across relocations.
+-->
+<mujoco model="fly_drone_scene_m6">
+  <include file="fly_drone_x2.xml"/>
+
+  <statistic meansize=".05"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="-20" elevation="-20" ellipsoidinertia="true"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.02 0.02 0.02" rgb2="0.9 0.9 0.9"
+      markrgb="0.5 0.5 0.5" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="20 20" reflectance="0.1"/>
+
+    <!-- Same material as drone_scene.xml's attractant_target - see that
+         file's own comment for the color-matching rationale
+         (fly_brain::ColorThreshold's defaults track this rgba numerically). -->
+    <material name="attractant_material" rgba="0.92 0.27 0.08 1" emission="0.6" specular="0.3" shininess="0.4"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+
+    <!-- M6 CHANGE from drone_scene.xml: same sphere, same spawn pos/size/
+         material, but now a real MuJoCo free-joint body (gravcomp="1" - see
+         file header) instead of a fixed/static one, so
+         mujoco_ros2_control_node's set_free_joint_state service can
+         teleport it at runtime (moving_target.py, driven by
+         /drone/free_joint_states). It is unnamed-freejoint, matched by BODY
+         name "attractant_target" - same idiom x2.xml's own <freejoint/>
+         uses for the "x2" body (see mujoco_ros2_control_plugins_m6.yaml's
+         comment on why FreeJointStatePublisherPlugin/SetFreeJointState both
+         match by body name, not joint name). -->
+    <body name="attractant_target" pos="3.0 0 0.15" gravcomp="1">
+      <freejoint/>
+      <geom name="attractant_target_geom" type="sphere" size="0.15" material="attractant_material"
+            contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+</mujoco>

@@ -1,0 +1,60 @@
+/**:
+  ros__parameters:
+    mujoco_plugins:
+      # Publishes ground-truth pose/twist of the drone's free-floating body.
+      # x2.xml's <freejoint/> is unnamed (vendored unmodified from
+      # mujoco_menagerie), so the MujocoSystemInterface's own
+      # `odom_free_joint_name` hardware param (which looks a free JOINT up by
+      # name) can't target it. FreeJointStatePublisherPlugin instead matches
+      # by BODY name ("x2", the <body name="x2"> that owns the free joint in
+      # x2.xml), which works regardless. This is the M0 "is mj_step actually
+      # progressing, without NaNs" signal: `ros2 topic echo /drone/free_joint_states`.
+      free_joint_state_publisher:
+        type: "mujoco_ros2_control_plugins/FreeJointStatePublisherPlugin"
+        frame_id: ""
+        body_names: ["x2"]
+        topic: "/drone/free_joint_states"
+        publish_rate: 50.0
+
+      # x2.xml declares one MJCF camera, name="track" (trackcom, chase view).
+      # fly_drone_x2.xml (M3) adds a second, "nose_cam" - see that file's
+      # header comment and NOTES.md's "## M3" section for why: "track" is
+      # mode="trackcom", which keeps a WORLD-FIXED orientation and only
+      # translates with the drone's center of mass - confirmed empirically
+      # (via the mujoco Python bindings: cam_xmat/cam_xpos are bit-identical
+      # across yaw=0/45/90deg) that it does NOT rotate with the body at all,
+      # making it useless for detecting the drone's own rotation via optic
+      # flow (M3's whole point). "nose_cam" has no `mode` attribute, so it
+      # defaults to mode="fixed" - rigidly attached to and rotating with the
+      # body, pointed forward-and-slightly-down (confirmed empirically: world
+      # view direction ~[0.95, 0, -0.30], i.e. ~18deg below horizontal) so the
+      # textured checker ground plane fills a useful fraction of the frame.
+      # CameraPlugin auto-registers every camera in the model; per-camera
+      # params are namespaced by that MJCF camera name. "track" is explicitly
+      # disabled (nothing consumes it) rather than left to its streaming
+      # default, to avoid rendering a second, unused camera every frame.
+      mujoco_camera_plugin:
+        type: "mujoco_ros2_control_plugins/CameraPlugin"
+        camera_publish_rate: 15.0
+        track:
+          policy: disabled
+        nose_cam:
+          policy: streaming
+          frame_name: x2_camera_frame
+          info_topic: /drone/camera/camera_info
+          image_topic: /drone/camera/image_raw
+          depth_topic: /drone/camera/depth/image_raw
+
+      # M2's disturbance-recovery test hook (real, confirmed against the
+      # vendored mujoco_ros2_control source - NOT the plan's speculative "if
+      # available" hedge - see NOTES.md's "## M2" section). Writes into
+      # MuJoCo's xfrc_applied for a named body via a ROS2 service, so a
+      # torque impulse can be applied identically and reproducibly to both
+      # M1's baseline_pid_controller and M2's haltere_reflex_controller for a
+      # fair before/after comparison. Sub-namespace "external_wrench" (the
+      # yaml key here) makes the service available at
+      # /external_wrench/apply_wrench (mujoco_ros2_control_plugins/src/
+      # mujoco_system_interface.cpp's load_mujoco_plugins() creates a sub-node
+      # per plugin named after this key).
+      external_wrench:
+        type: "mujoco_ros2_control_plugins/ExternalWrenchPlugin"

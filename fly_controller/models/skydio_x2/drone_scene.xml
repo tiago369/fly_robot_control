@@ -1,0 +1,116 @@
+<!--
+  NOT part of the vendored mujoco_menagerie skydio_x2 checkout (see
+  VENDORED_FROM.md) - this is our own project file. It includes
+  fly_drone_x2.xml (our derivative of x2.xml - see that file's header for why
+  a derivative was needed) instead of x2.xml directly, and reproduces the
+  ground plane / skybox / lighting from the vendored scene.xml verbatim
+  (rather than <include>-ing scene.xml, which would <include> x2.xml a second
+  time and duplicate the "x2" body).
+
+  It lives in this directory (not one level up) because MuJoCo resolves an
+  included file's relative asset paths (assetdir="assets") against the
+  outermost loaded file's directory, not the including file's directory -
+  confirmed empirically while building M0.
+-->
+<mujoco model="fly_drone_scene">
+  <include file="fly_drone_x2.xml"/>
+
+  <statistic meansize=".05"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="-20" elevation="-20" ellipsoidinertia="true"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <!-- M3 CHANGED from the vendored scene.xml's groundplane texture (see
+         NOTES.md's "## M3" section): rgb1/rgb2 pushed to near black/white
+         (was a muted blue-gray pair, ~0.1-0.2 contrast) and texrepeat bumped
+         5x5 -> 60x60 (was: checker squares many meters wide, so the drone's
+         nose_cam - see fly_drone_x2.xml - only ever saw a fraction of ONE
+         square at typical hover altitude/distance; a yaw sweep of even
+         several tens of degrees barely crossed a single edge, starving
+         ReichardtEmdArray of any real luminance transitions to correlate).
+         Confirmed empirically: this single change increased the live EMD's
+         forward_drift signal magnitude by roughly an order of magnitude for
+         the same commanded yaw rate (see NOTES.md for before/after numbers) -
+         needed to get the optic-flow yaw correction (haltere_reflex_
+         controller's optic_flow_yaw_gain parameter) into a gain range that's
+         both effective and stable, rather than needing an aggressive gain
+         that amplifies real closed-loop feedback delay into a self-sustained
+         yaw oscillation (also documented in NOTES.md). -->
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.02 0.02 0.02" rgb2="0.9 0.9 0.9"
+      markrgb="0.5 0.5 0.5" width="300" height="300"/>
+    <!-- texrepeat retuned down from an initial 60x60 attempt (see NOTES.md's
+         "## M3" section): 60x60 checker cells are finer than the 32x32 EMD
+         downsample grid can resolve at typical hover viewing distance -
+         classic spatial aliasing (checker edges landing at sub-grid-cell
+         phase produce a highly position/phase-dependent, non-monotonic
+         response instead of a clean function of yaw rate) - confirmed
+         empirically via a same-magnitude-regardless-of-disturbance-sign
+         result that should have flipped sign. 20x20 is a middle ground
+         between that (too fine) and the original 5x5 (too coarse - checker
+         squares wider than the whole FOV at hover altitude). -->
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="20 20" reflectance="0.1"/>
+
+    <!-- M5: the phototaxis attractant target's material - bright, fully
+         saturated orange/red, chosen specifically to sit far outside the
+         groundplane texture's near-black/near-white/mid-gray palette and the
+         blue-gradient skybox (see fly_brain::ColorThreshold's own defaults in
+         color_blob_detector.hpp, which are kept numerically in agreement
+         with this rgba so the live detector matches what's actually
+         rendered). `emission` pushes it toward "glowing" so it stays visually
+         distinct under the scene's headlight/ambient lighting rather than
+         reading as a dim red the way a purely diffuse material would at
+         distance/grazing angles - not a physically-real light source, purely
+         a rendering aid for "visually salient", per the M5 brief. -->
+    <material name="attractant_material" rgba="0.92 0.27 0.08 1" emission="0.6" specular="0.3" shininess="0.4"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+
+    <!-- M5: phototaxis attractant target - a static (no joint = fixed to the
+         world) sphere resting on the ground plane, 3m directly ahead of the
+         drone's spawn point (spawn: body "x2" at world (0,0,0.1), see
+         x2.xml/fly_drone_x2.xml) along its initial +X heading (REP103
+         forward, yaw=0 at spawn).
+
+         Distance/visibility reasoning (checked geometrically, not guessed -
+         see NOTES.md's "## M5" section for the full derivation): at the
+         controllers' shared hover setpoint z=0.5m (descending_fusion_
+         controller's z_setpoint, unchanged from M1/M4), nose_cam sits at
+         approximately world (0.15, 0, 0.5) (its body-frame offset is
+         pos="0.15 0 0.0", see fly_drone_x2.xml) and looks along world
+         direction ~[0.95, 0, -0.30] (~17.5deg below horizontal - same
+         geometry M3/M4 already validated the ground-plane visibility of).
+         With the default fovy=45deg (half-angle 22.5deg), nose_cam's
+         vertical frustum spans roughly [-5, +40] degrees from horizontal
+         (down positive) - i.e. it sees ground from directly underneath out
+         to the horizon, EXCLUDING a small band right at the top of frame
+         above the horizon (sky). A target ~2.85m in front of the camera (3m
+         from the body origin, camera offset 0.15m) is seen at a downward
+         angle atan(0.5/2.85) = ~9.9deg - comfortably inside the visible
+         [0,40]deg ground band, appearing in the upper-middle portion of the
+         frame (a plausible, not-too-close, not-off-frame starting view).
+         3m is also "a few meters" per the brief: far enough that reaching it
+         is a real navigation test (not just a few cm of drift), close enough
+         that a several-m/s-capable multirotor covers it in well under a
+         minute even at the gentle forward-pitch commands
+         phototaxis_forward_pitch_ (descending_fusion_controller.hpp) uses.
+
+         Sphere radius 0.15m (comparable to the drone's own ~0.3m body
+         diagonal - big enough to register a meaningful area_fraction in
+         ColorBlobDetector well before the drone is right on top of it, small
+         enough to look like a discrete "target" object rather than a wall),
+         center at z=0.15 (radius) so it rests exactly on the z=0 ground
+         plane, no interpenetration. -->
+    <body name="attractant_target" pos="3.0 0 0.15">
+      <geom name="attractant_target_geom" type="sphere" size="0.15" material="attractant_material"
+            contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+</mujoco>

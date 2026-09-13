@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>fly_simulation</name>
+  <version>0.0.1</version>
+  <description>
+    Bring-up package: launch files that start mujoco_ros2_control with the
+    drone model, robot_state_publisher, controller_manager, and (from M1
+    onward) spawn either the baseline PID controller or the fly-brain chain,
+    plus rosbag2 recording for evaluation.
+  </description>
+  <maintainer email="tiagobarreto581@gmail.com">Tiago Barreto</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>fly_controller</exec_depend>
+  <exec_depend>fly_brain</exec_depend>
+  <exec_depend>mujoco_ros2_control</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <!-- brain_activity_monitor.py -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>controller_manager_msgs</exec_depend>
+  <exec_depend>mujoco_ros2_control_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <!-- moving_target.py (M6): geometry_msgs::Pose/Twist for the
+       set_free_joint_state teleport request. -->
+  <exec_depend>geometry_msgs</exec_depend>
+  <!-- python3-tk itself is a plain OS package with no rosdep key guaranteed
+       to resolve cleanly across distros - installed directly in
+       docker/Dockerfile's OS deps list instead of through rosdep here. -->
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

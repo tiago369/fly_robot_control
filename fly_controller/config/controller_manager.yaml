@@ -1,0 +1,119 @@
+controller_manager:
+  ros__parameters:
+    # Matches the MJCF <option timestep="0.01"/> in models/skydio_x2/x2.xml
+    # (100 Hz). M2's haltere-reflex target rate (~500 Hz, per the project plan)
+    # will need a smaller MJCF timestep (or intra-step substeps) - not solved
+    # in M0, see NOTES.md.
+    update_rate: 100
+
+    imu_sensor_broadcaster:
+      type: imu_sensor_broadcaster/IMUSensorBroadcaster
+
+    baseline_pid_controller:
+      type: fly_controller/BaselinePidController
+
+    # M2: haltere-analog reflex controller (fly_brain package). Chainable
+    # (controller_interface::ChainableControllerInterface) - see NOTES.md's
+    # "## M2" section - but run standalone here (no DescendingFusionController
+    # exists yet to chain in front of it), so its own fixed
+    # standalone_*_setpoint parameters below act as its reference input.
+    haltere_reflex_controller:
+      type: fly_brain/HaltereReflexController
+
+imu_sensor_broadcaster:
+  ros__parameters:
+    sensor_name: imu
+    frame_id: x2
+
+baseline_pid_controller:
+  ros__parameters:
+    # MuJoCo body name that owns the free joint (matches
+    # mujoco_ros2_control_plugins.yaml's free_joint_state_publisher
+    # body_names, and x2.xml's <body name="x2">).
+    body_name: x2
+
+    # A bit above the vendored MJCF's own validated <keyframe name="hover">
+    # (qpos z=0.3, ctrl sum == mass*g exactly - see NOTES.md's "## M1"
+    # section) and well clear of the ground-resting pose (~0.1 m, see M0's
+    # runtime verification). Gives a real climb transient to observe.
+    z_setpoint: 0.5
+
+    # Sum of x2.xml's geom masses (4 rotor geoms x 0.25 kg + 1 body ellipsoid
+    # x 0.325 kg = 1.325 kg) - cross-checked against the keyframe: hover ctrl
+    # sum (4 x 3.2495625 = 12.998 N) / 9.81 = 1.3250 kg, exact match.
+    mass: 1.325
+
+    # Matches x2.xml's <motor class="x2" ctrlrange="0 13"> (shared by all 4
+    # rotor actuators via the "x2" default class).
+    min_thrust_per_rotor: 0.0
+    max_thrust_per_rotor: 13.0
+
+    # Yaw-reaction-torque-to-thrust ratio, read directly off x2.xml's
+    # <motor gear="0 0 1 0 0 +-.0201">: gear[5]/gear[2] = 0.0201.
+    drag_to_thrust: 0.0201
+
+    complementary_filter_alpha: 0.98
+
+    # Tuned empirically in simulation (see NOTES.md's "## M1" section for the
+    # verification run these gains were validated against).
+    kp_z: 12.0
+    ki_z: 2.0
+    kd_z: 8.0
+    kp_att_roll: 6.0
+    kp_att_pitch: 6.0
+    kp_rate_x: 0.08
+    kd_rate_x: 0.004
+    kp_rate_y: 0.08
+    kd_rate_y: 0.004
+    kp_rate_z: 0.06
+    kd_rate_z: 0.003
+
+haltere_reflex_controller:
+  ros__parameters:
+    # Same vehicle constants as baseline_pid_controller (single source of
+    # truth: x2.xml's geom masses / <motor> ctrlrange / gear yaw-drag ratio -
+    # see NOTES.md's "## M1" section).
+    mass: 1.325
+    min_thrust_per_rotor: 0.0
+    max_thrust_per_rotor: 13.0
+    drag_to_thrust: 0.0201
+    complementary_filter_alpha: 0.98
+
+    # Standalone-mode fixed setpoint (no DescendingFusionController exists
+    # yet to chain in - see NOTES.md's "## M2" section): level attitude,
+    # zero yaw rate, thrust = hover feedforward (mass * 9.80665 = 12.998 N,
+    # matches BaselinePidController's hover_thrust) plus a 2% climb margin
+    # (13.258 N) - NOT exactly hover thrust. See NOTES.md: exactly-hover
+    # thrust left the drone hovering right at ground-contact height
+    # indefinitely, and it eventually tipped over for real via MuJoCo ground
+    # contact forces. M2's task is attitude/rate disturbance rejection, not
+    # altitude holding, so there is no altitude PID here - thrust is an
+    # open-loop constant, just with enough margin to actually clear the
+    # ground first.
+    standalone_roll_setpoint: 0.0
+    standalone_pitch_setpoint: 0.0
+    standalone_yaw_rate_setpoint: 0.0
+    standalone_thrust_setpoint: 13.258
+
+    # Retuned from HaltereReflex::Gains' library defaults (kp_att=6,
+    # kp_rate=0.08, kd_rate=0.004 on x/y) - see NOTES.md's "## M2" section.
+    # The library defaults were copied from CascadedPid's small-signal
+    # near-hover gains (M1), which were never validated against a real
+    # attitude upset: a 27 degree disturbance test with the untouched
+    # defaults took several seconds to even begin recovering (rate authority
+    # was far too weak for the vehicle's actual roll/pitch inertia). Retuned
+    # by first grid-searching a single-axis point-mass model (no actuator
+    # saturation) for a fast, low-overshoot response, then validating and
+    # backing off from that model's optimum (which ignored per-rotor thrust
+    # saturation and was unrealistically aggressive) against the real
+    # simulator until the response was fast and clean with no saturation-
+    # induced oscillation. kp_rate_z/kd_rate_z (yaw) untouched - the
+    # disturbance test only excites roll/pitch.
+    kp_att_roll: 12.0
+    kp_att_pitch: 12.0
+    kp_rate_x: 0.4
+    kd_rate_x: 0.02
+    kp_rate_y: 0.4
+    kd_rate_y: 0.02
+    kp_rate_z: 0.06
+    kd_rate_z: 0.003

@@ -1,0 +1,137 @@
+<!--
+  M7 scene variant - see NOTES.md's "## M7" section for the full story.
+
+  A small 3-room "house" for room-to-room vision-only navigation: drone spawns
+  in Room 1 (contains world origin, matching every prior milestone's spawn
+  pos="0 0 0.1" baked into x2.xml/fly_drone_x2.xml - untouched), must pass
+  through a DOOR into Room 2, then through a WINDOW into Room 3, guided the
+  whole way by fly_brain::PhototaxisController's color-blob detection of a
+  single free-jointed beacon sphere (identical mechanism to M6's
+  "attractant_target": <freejoint/> + gravcomp="1", kinematically parked,
+  moved only by fly_simulation/scripts/house_navigator.py's
+  set_free_joint_state calls) - reused verbatim from M6 rather than managing
+  multiple beacon bodies, see house_navigator.py's own module docstring for
+  why.
+
+  Layout (all dimensions checked against the drone's real footprint/geometry
+  before picking numbers - x2.xml's rotor sites span a 0.28m x 0.36m
+  rectangle plus 0.13m rotor-ellipsoid radius, so worst-case footprint is
+  roughly 0.54m x 0.62m; hover altitude (descending_fusion_controller's
+  z_setpoint) is 0.5m - see NOTES.md's "## M7" section for the full
+  room/opening sizing and camera-FOV reasoning):
+
+    Room 1            Room 2            Window
+    (x -3.0..2.0) DOOR (x 2.0..6.0)  (into Room 3, x 6.0..10.0)
+    spawn (0,0)   (x=2.0 wall,   (x=6.0 wall,
+                   y +-0.75,      y 0.4..1.6,
+                   z 0..2.0)      z 0.2..1.6)
+
+  Exterior walls are 0.2m thick, 2.4m tall boxes (real MuJoCo collision +
+  visual geometry, not decorative-only - this is what makes the "beacon in
+  Room 3 not visible from Room 1" occlusion check in NOTES.md a genuine
+  rendering/physics fact, not something faked). The door is a full-height
+  (0..2.0m, header above it to the 2.4m wall top) 1.5m-wide opening - a real
+  doorway. The window is a smaller, ELEVATED opening (sill at 0.2m, header at
+  1.6m - i.e. it does not reach the floor, unlike the door) - the
+  brief's own suggested way to make it visually/structurally distinct from a
+  door without needing transparent glass geometry.
+
+  Beacon waypoints (driven by house_navigator.py, not baked as multiple
+  bodies - see that script's own header comment): the sphere SPAWNS at
+  waypoint 0 (3.0, 0.0, 0.15 - just past the door, floor-level, exactly M5's
+  own proven 3m-spawn-distance/floor-level geometry) and is teleported to
+  waypoint 1 (7.0, 1.0, 0.4 - just past the window, elevated to clear the
+  window's 0.2m sill from a hovering camera's sightline - see NOTES.md) and
+  then waypoint 2 (9.0, 0.3, 0.15 - Room 3, floor-level, the "arrival"
+  beacon - offset far enough from the window's y in [0.4, 1.6] opening that a
+  straight line from Room 1/spawn to it crosses the room2/room3 wall's plane
+  at y~=0.2 (outside the window gap) and is blocked by solid wall, while
+  still staying within nose_cam's horizontal FOV from just past the window -
+  see NOTES.md's "## M7" occlusion/FOV reasoning, checked numerically, not
+  guessed) as the drone reaches each one in turn.
+-->
+<mujoco model="fly_drone_scene_m7">
+  <include file="fly_drone_x2.xml"/>
+
+  <statistic meansize=".05"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="-20" elevation="-20" ellipsoidinertia="true"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.02 0.02 0.02" rgb2="0.9 0.9 0.9"
+      markrgb="0.5 0.5 0.5" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="20 20" reflectance="0.1"/>
+
+    <!-- Same material as drone_scene.xml/drone_scene_m6.xml's
+         attractant_target - fly_brain::ColorThreshold's compiled-in defaults
+         (color_blob_detector.hpp) are kept numerically identical to this
+         rgba, same rationale as M5/M6. -->
+    <material name="attractant_material" rgba="0.92 0.27 0.08 1" emission="0.6" specular="0.3" shininess="0.4"/>
+
+    <!-- Wall material: deliberately desaturated (near-equal channels) so
+         fly_brain::ColorBlobDetector's min_channel_spread=50 rejects it
+         outright regardless of hue, same "why the ground plane doesn't fire
+         the detector" mechanism M5's NOTES.md section already documents -
+         the beacon must be the only color-salient thing in this world. -->
+    <material name="wall_material" rgba="0.75 0.75 0.72 1" specular="0.05" shininess="0.05"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <light pos="4 0 1.5" dir="0 0 -1" directional="true"/>
+    <light pos="8 0 1.5" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+
+    <!-- ============================== WALLS ============================
+         All static (no joint) box geoms, real collision (default contype/
+         conaffinity - NOT disabled like the beacon sphere) so this is
+         genuine MuJoCo occlusion, not a rendering trick. Box "size" is
+         half-extents; every box below is a room1/room2/room3 divider or
+         exterior wall, sized per the file-header layout table. -->
+
+    <!-- Back wall (closes Room 1, x=-3.0) -->
+    <geom name="wall_back" type="box" pos="-3.0 0 1.2" size="0.1 2.1 1.2" material="wall_material"/>
+    <!-- Front wall (closes Room 3, x=10.0 - end of the house) -->
+    <geom name="wall_front" type="box" pos="10.0 0 1.2" size="0.1 2.1 1.2" material="wall_material"/>
+    <!-- Side walls (y=-2.1 / y=+2.1), full house length -->
+    <geom name="wall_side_neg_y" type="box" pos="3.5 -2.1 1.2" size="6.6 0.1 1.2" material="wall_material"/>
+    <geom name="wall_side_pos_y" type="box" pos="3.5 2.1 1.2" size="6.6 0.1 1.2" material="wall_material"/>
+
+    <!-- Door wall (Room 1 / Room 2 divider, x=2.0): a 1.5m-wide, full-height
+         (0..2.0m) doorway, y in [-0.75, 0.75] - see file header. Built from
+         two side segments + a header above the opening. -->
+    <geom name="wall_door_left" type="box" pos="2.0 -1.425 1.2" size="0.1 0.675 1.2" material="wall_material"/>
+    <geom name="wall_door_right" type="box" pos="2.0 1.425 1.2" size="0.1 0.675 1.2" material="wall_material"/>
+    <geom name="wall_door_header" type="box" pos="2.0 0 2.2" size="0.1 0.75 0.2" material="wall_material"/>
+
+    <!-- Window wall (Room 2 / Room 3 divider, x=6.0): a 1.2m-wide, ELEVATED
+         opening, y in [0.4, 1.6], z in [0.2, 1.6] - sill above the floor and
+         header below the wall top, distinctly smaller/higher than the door
+         (see file header). Built from two side segments + a sill (below the
+         opening) + a header (above it). -->
+    <geom name="wall_window_left" type="box" pos="6.0 -0.85 1.2" size="0.1 1.25 1.2" material="wall_material"/>
+    <geom name="wall_window_right" type="box" pos="6.0 1.85 1.2" size="0.1 0.25 1.2" material="wall_material"/>
+    <geom name="wall_window_sill" type="box" pos="6.0 1.0 0.1" size="0.1 0.6 0.1" material="wall_material"/>
+    <geom name="wall_window_header" type="box" pos="6.0 1.0 2.0" size="0.1 0.6 0.4" material="wall_material"/>
+
+    <!-- ============================= BEACON =============================
+         Identical mechanism to M6's "attractant_target": real free-joint
+         body, gravcomp="1" (exactly cancels gravity - stays kinematically
+         parked wherever house_navigator.py last teleported it, see that
+         file's own header comment and NOTES.md's "## M6"/"## M7" sections),
+         contype="0" conaffinity="0" (no collision - a vision target, not an
+         obstacle; also means it cannot get stuck ON a wall geom if a
+         teleport ever placed it too close to one). Spawns at waypoint 0
+         (see file header for the 3-waypoint sequence). -->
+    <body name="attractant_target" pos="3.0 0 0.15" gravcomp="1">
+      <freejoint/>
+      <geom name="attractant_target_geom" type="sphere" size="0.15" material="attractant_material"
+            contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+</mujoco>

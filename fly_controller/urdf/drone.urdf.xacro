@@ -1,0 +1,188 @@
+<?xml version="1.0"?>
+<!--
+  M0 robot description for the fly-brain drone.
+
+  This URDF exists only to give ros2_control a `<ros2_control>` block; the
+  actual physical model (body, 4 rotors, IMU site) lives in the MuJoCo MJCF
+  (models/skydio_x2/drone_scene.xml, built from the vendored x2.xml - see
+  VENDORED_FROM.md in that directory), which mujoco_ros2_control loads
+  directly. There is intentionally no kinematic tree here beyond a single
+  root link - the drone is a MuJoCo free-floating body, not a URDF-articulated
+  robot.
+
+  See NOTES.md at the repo root for the full story on the four rotor
+  "joints" below, and on where the IMU/free-joint state come from.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="fly_drone">
+  <xacro:arg name="headless" default="true"/>
+  <xacro:arg name="sim_speed_factor" default="1.0"/>
+  <!-- M6: which MJCF file (under models/skydio_x2/) mujoco_ros2_control loads.
+       Defaults to drone_scene.xml (M0-M5's scene, static attractant target,
+       untouched) so this arg is purely additive - every existing launch file
+       that doesn't pass mujoco_model keeps loading exactly what it always
+       has. M6's launch overrides it to drone_scene_m6.xml (same scene, but
+       the attractant target is a real free-joint body so it can be
+       teleported at runtime - see NOTES.md's "## M6" section). -->
+  <xacro:arg name="mujoco_model" default="drone_scene.xml"/>
+
+  <link name="x2"/>
+
+  <!--
+    ros2_control's resource_manager cross-checks every <ros2_control><joint>
+    name against a real <joint> in the URDF's kinematic tree (confirmed
+    empirically - it does NOT accept a hardware-resource-only joint name with
+    no matching URDF joint, "Joint 'thrust1' not found in URDF"), AND rejects
+    `fixed` joints outright ("Fixed joints do not make sense in ros2_control",
+    also confirmed empirically). Our rotors have no real URDF-expressible DOF
+    (they're MuJoCo site-transmission thrust actuators, fixed relative to the
+    body - see the <ros2_control> block below), so `continuous` (an unbounded
+    revolute joint - the closest URDF concept to "a spinning rotor") is used
+    purely to satisfy ros2_control's parser; it carries no physical meaning
+    here and is NOT simulated as a joint by MuJoCo (MuJoCo only ever sees
+    models/skydio_x2/x2.xml, which has no rotor joints either - see that
+    file's <site>+<motor> gear-vector thrust actuators). Positions mirror the
+    thrust site locations in x2.xml, for TF/RViz sanity only.
+  -->
+  <link name="rotor1"/>
+  <joint name="thrust1" type="continuous">
+    <parent link="x2"/>
+    <child link="rotor1"/>
+    <origin xyz="-0.14 -0.18 0.05" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <link name="rotor2"/>
+  <joint name="thrust2" type="continuous">
+    <parent link="x2"/>
+    <child link="rotor2"/>
+    <origin xyz="-0.14 0.18 0.05" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <link name="rotor3"/>
+  <joint name="thrust3" type="continuous">
+    <parent link="x2"/>
+    <child link="rotor3"/>
+    <origin xyz="0.14 0.18 0.08" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <link name="rotor4"/>
+  <joint name="thrust4" type="continuous">
+    <parent link="x2"/>
+    <child link="rotor4"/>
+    <origin xyz="0.14 -0.18 0.08" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <ros2_control name="MujocoSystem" type="system">
+    <hardware>
+      <plugin>mujoco_ros2_control/MujocoSystemInterface</plugin>
+      <param name="mujoco_model">$(find fly_controller)/models/skydio_x2/$(arg mujoco_model)</param>
+      <param name="sim_speed_factor">$(arg sim_speed_factor)</param>
+      <param name="headless">$(arg headless)</param>
+      <!--
+        Post-M6: default MuJoCo's own interactive Simulate window
+        (headless:=false) to track the drone body instead of opening in free
+        camera. Requires the docker/patches/mujoco_ros2_control-default-
+        track-camera.patch vendored patch (see docker/Dockerfile) - upstream
+        mujoco_ros2_control has no such parameter otherwise. Body name must
+        match the <body name="x2" ...> in models/skydio_x2/x2.xml. Set here
+        (the one <hardware> block every M0-M6 launch file routes through via
+        this xacro) so it applies everywhere with no per-launch-file changes.
+      -->
+      <param name="default_track_body">x2</param>
+
+      <!--
+        IMU sensor-name-suffix overrides. The documented example
+        (mujoco_ros2_control's docs/hardware_interface.rst) shows these nested
+        inside the <sensor name="imu"> block, but the actual source
+        (mujoco_system_interface.cpp's register_sensors(), ~line 1974) reads
+        them via get_hardware_parameter_or(get_hardware_info(), ...) - i.e.
+        from THIS top-level <hardware> param map, not the sensor's own
+        parameters (which register_sensors() DOES read correctly for
+        mujoco_type/mujoco_sensor_name, via get_sensor_parameter_or()).
+        Confirmed empirically: placed under <sensor>, `linear_acceleration_
+        mjcf_suffix` was silently ignored and it fell back to the "_accel"
+        default, which doesn't exist on x2.xml's "body_linacc" sensor
+        ("Failed to find IMU sensor 'body_accel'"). Moving it here fixed it.
+      -->
+      <param name="linear_acceleration_mjcf_suffix">_linacc</param>
+    </hardware>
+
+    <!--
+      The 4 rotors are MuJoCo `<motor>` actuators transmitted through a SITE
+      (gear-vector thrust + reaction-torque), not a joint - the standard
+      MuJoCo idiom for a multirotor (see models/skydio_x2/x2.xml). mujoco_ros2_
+      control's MujocoSystemInterface::get_actuator_id() resolves a ros2_control
+      joint name against MuJoCo actuator names directly when no matching MuJoCo
+      *joint* exists, so naming these "joints" thrust1..thrust4 (matching the
+      MJCF actuator names) is enough for command routing.
+
+      These MuJoCo actuators have `biastype="none"` (plain force output, no
+      PD terms), which MujocoSystemInterface classifies as ActuatorType::MOTOR
+      -> natively maps to a ros2_control "effort" command interface (writes
+      straight into MuJoCo's ctrl[] for that actuator).
+
+      No position/velocity state_interface is declared for these (they don't
+      correspond to any real MuJoCo joint - see NOTES.md's "latent bug" section
+      for a real out-of-bounds address computation in MujocoSystemInterface's
+      actuator registration that a position/velocity state_interface here
+      would surface). A plain `effort` state_interface IS declared below: with
+      zero state_interfaces at all, MujocoSystemInterface's initial-value setup
+      (on_init, ~line 1511-1536) never runs for this joint, so its effort
+      *command* is left permanently NaN (never initialized to 0) - which
+      produced a real "Nan, Inf or huge value in CTRL" MuJoCo warning at
+      startup, observed when bringing this up for real. Declaring the effort
+      state_interface (defaulting to 0.0, no initial_value param needed) makes
+      that init code run and gives the command a real starting value. The
+      *reported* effort state number for these joints may not be numerically
+      meaningful until the addressing bug above is fixed upstream or worked
+      around - don't trust it for anything past "is it NaN or a plausible
+      float" in M0.
+    -->
+    <joint name="thrust1">
+      <command_interface name="effort"/>
+      <state_interface name="effort"/>
+    </joint>
+    <joint name="thrust2">
+      <command_interface name="effort"/>
+      <state_interface name="effort"/>
+    </joint>
+    <joint name="thrust3">
+      <command_interface name="effort"/>
+      <state_interface name="effort"/>
+    </joint>
+    <joint name="thrust4">
+      <command_interface name="effort"/>
+      <state_interface name="effort"/>
+    </joint>
+
+    <!--
+      IMU: x2.xml's <sensor> block defines framequat/gyro/accelerometer
+      sensors named body_quat / body_gyro / body_linacc on the "imu" site.
+      This maps to a single ros2_control IMU sensor per mujoco_ros2_control's
+      documented (and source-verified) sensor schema - these ARE real
+      hardware_interface state interfaces, contrary to this project's
+      original pre-M0 assumption that IMU support was unconfirmed.
+      orientation/angular_velocity use the library's own defaults (_quat,
+      _gyro), which already match x2.xml; linear_acceleration's override
+      lives in <hardware> above (see the comment there for why).
+    -->
+    <sensor name="imu">
+      <param name="mujoco_type">imu</param>
+      <param name="mujoco_sensor_name">body</param>
+
+      <state_interface name="orientation.x"/>
+      <state_interface name="orientation.y"/>
+      <state_interface name="orientation.z"/>
+      <state_interface name="orientation.w"/>
+      <state_interface name="angular_velocity.x"/>
+      <state_interface name="angular_velocity.y"/>
+      <state_interface name="angular_velocity.z"/>
+      <state_interface name="linear_acceleration.x"/>
+      <state_interface name="linear_acceleration.y"/>
+      <state_interface name="linear_acceleration.z"/>
+    </sensor>
+  </ros2_control>
+</robot>

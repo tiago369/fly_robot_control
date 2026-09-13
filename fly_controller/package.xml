@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>fly_controller</name>
+  <version>0.0.1</version>
+  <description>
+    ros2_control integration layer for the fly-brain drone: robot description
+    (URDF/xacro wrapping a vendored MuJoCo MJCF drone model), controller_manager
+    configuration, and (from M1 onward) the conventional BaselinePidController
+    used as the comparison baseline against the bio-inspired fly_brain controllers.
+  </description>
+  <maintainer email="tiagobarreto581@gmail.com">Tiago Barreto</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <depend>controller_interface</depend>
+  <depend>hardware_interface</depend>
+  <depend>pluginlib</depend>
+  <depend>realtime_tools</depend>
+  <depend>fly_brain</depend>
+  <depend>mujoco_ros2_control_msgs</depend>
+
+  <exec_depend>mujoco_ros2_control</exec_depend>
+  <exec_depend>mujoco_ros2_control_plugins</exec_depend>
+  <exec_depend>ros2_control</exec_depend>
+  <exec_depend>ros2_controllers</exec_depend>
+  <exec_depend>imu_sensor_broadcaster</exec_depend>
+  <exec_depend>joint_state_broadcaster</exec_depend>
+  <exec_depend>xacro</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
