@@ -153,7 +153,7 @@ void test_lptc_pooling() {
   // spatially localized to their assigned receptive-field band (not just an
   // aliased whole-grid average under a new name) - see lptc_pooling.hpp's
   // header comment for the HSN/HSE/HSS (dorsal/equatorial/ventral) and
-  // VS1-VS6 (frontal-to-posterior azimuth) band layout.
+  // VS1-VS8 (frontal-to-posterior azimuth) band layout.
   //
   // Stimulus: a converging/diverging ("looming-like") pattern - the grating
   // drifts one way on one half of the band and the opposite way on the
@@ -162,7 +162,7 @@ void test_lptc_pooling() {
   // finding, a uniform drift produces near-zero antisymmetric-pooled
   // response (it's what "forward_drift"'s symmetric pooling picks up
   // instead), so it wouldn't exercise HS/VS's antisymmetric pooling at all.
-  const std::size_t w = 24, h = 24;  // divides evenly into 3 HS rows-bands and 6 VS column-bands
+  const std::size_t w = 24, h = 24;  // divides evenly into 3 HS row-bands and 8 VS column-bands
   const double dt = 1.0 / 60.0;
   const double speed = 6.0;
 
@@ -190,14 +190,14 @@ void test_lptc_pooling() {
     std::printf("test_lptc_pooling HS done (HSN=%.6f HSE=%.6f HSS=%.6f)\n", hs[0], hs[1], hs[2]);
   }
 
-  // VS check: converging pattern confined to columns [0, 4) - VS1's band.
+  // VS check: converging pattern confined to columns [0, 3) - VS1's band.
   {
     ReichardtEmdArray emd(w, h, 0.05);
     double phase_top = 0.0, phase_bottom = 0.0;
     const double cy = (static_cast<double>(h) - 1.0) / 2.0;
     for (int i = 0; i < 30; ++i) {
       std::vector<float> img(w * h, 0.5f);
-      for (std::size_t x = 0; x < 4; ++x) {
+      for (std::size_t x = 0; x < 3; ++x) {
         for (std::size_t y = 0; y < h; ++y) {
           const double phase = (static_cast<double>(y) - cy) >= 0 ? phase_bottom : phase_top;
           img[y * w + x] = static_cast<float>(
@@ -209,8 +209,8 @@ void test_lptc_pooling() {
       phase_bottom -= speed * dt;
     }
     const auto& vs = emd.vs_activity();
-    CHECK(std::abs(vs[0]) > 5.0 * std::abs(vs[5]));  // VS1 (frontal, stimulated) >> VS6
-    std::printf("test_lptc_pooling VS done (VS1=%.6f VS6=%.6f)\n", vs[0], vs[5]);
+    CHECK(std::abs(vs[0]) > 5.0 * std::abs(vs[7]));  // VS1 (frontal, stimulated) >> VS8
+    std::printf("test_lptc_pooling VS done (VS1=%.6f VS8=%.6f)\n", vs[0], vs[7]);
   }
 }
 

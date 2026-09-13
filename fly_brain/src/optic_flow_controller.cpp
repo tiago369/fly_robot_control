@@ -222,8 +222,9 @@ controller_interface::return_type OpticFlowController::update_and_write_commands
     const auto& vs = emd_->vs_activity();
     RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
                           "optic flow LPTCs: HSN=%.5f HSE=%.5f HSS=%.5f | "
-                          "VS1=%.5f VS2=%.5f VS3=%.5f VS4=%.5f VS5=%.5f VS6=%.5f",
-                          hs[0], hs[1], hs[2], vs[0], vs[1], vs[2], vs[3], vs[4], vs[5]);
+                          "VS1=%.5f VS2=%.5f VS3=%.5f VS4=%.5f VS5=%.5f VS6=%.5f VS7=%.5f VS8=%.5f",
+                          hs[0], hs[1], hs[2], vs[0], vs[1], vs[2], vs[3], vs[4], vs[5], vs[6],
+                          vs[7]);
   }
 
   if (!yaw_rate_ref_->set_value(est.yaw_rate) || !roll_drift_ref_->set_value(est.roll_drift) ||

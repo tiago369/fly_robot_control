@@ -4,32 +4,54 @@
 // each pool hundreds of retinotopic T4/T5 elementary-motion-detector (EMD)
 // columns into wide-field self-rotation estimators (Hausen 1982; Krapp &
 // Hengstenberg, Nature 1996, "Estimation of self-motion by optic flow
-// processing in single visual interneurons"). The 2024 eLife connectomic
-// survey of the full Drosophila LPTC population ("A comprehensive
-// neuroanatomical survey of the Drosophila Lobula Plate Tangential Neurons
-// with predictions for their optic flow sensitivity", Braun et al.) counts
-// 58 LPTs per hemisphere, including 3 HS cells (HSN/HSE/HSS) and 8 VS cells,
-// and confirms HS/VS are the primary rotation-selective population, each
-// cell's receptive field tiling a distinct band of the eye.
+// processing in single visual interneurons").
 //
-// This is a literature-informed RATE-BASED approximation, not a per-synapse
-// reconstruction pulled from the live FlyWire/hemibrain connectome (no API
-// query was made - that requires the account credentials of whoever wants
-// the raw EM data) and not a spiking simulation. What it borrows from the
-// real circuit is the STRUCTURE: named cells, each with its own retinotopic
-// receptive-field band, rather than one anonymous whole-eye average. See
-// NOTES.md's "## Post-M7: connectome-informed LPTC pooling" section.
+// The cell counts and the HS<->horizontal / VS<->vertical routing below are
+// no longer just a literature paraphrase - they were checked against REAL
+// FlyWire FAFB connectome data (v783, public Zenodo release, CC-BY 4.0, no
+// account needed: github.com/flyconnectome/flywire_annotations for cell-type
+// labels + zenodo.org/records/10676866's proofread_connections_783.feather
+// for real per-neuron-pair synapse counts). Querying that data on
+// 2026-09-13 found, per hemisphere:
+//   - Exactly 3 HS cells (HSN, HSE, HSS) and exactly 8 VS cells (VS1-VS8) -
+//     matching the 2024 eLife connectomic survey (Braun et al., "A
+//     comprehensive neuroanatomical survey of the Drosophila Lobula Plate
+//     Tangential Neurons with predictions for their optic flow
+//     sensitivity"), which also counts 58 LPTs per hemisphere in total.
+//   - HSN/HSE/HSS each receive the overwhelming majority of their measured
+//     T4/T5 synapses from the T4a/T5a subtype specifically (e.g. HSE_right:
+//     3921 T5a + 3317 T4a synapses out of 7242 total measured - 99.97%)
+//     - T4a/T5a is the subtype tuned to front-to-back (horizontal) local
+//     motion, confirming HS cells should pool the HORIZONTAL EMD signal.
+//   - VS1-VS8 each receive the overwhelming majority of their measured T4/T5
+//     synapses from the T4d/T5d subtype (with a T4b/T5b contribution for
+//     VS1/VS2 specifically) - T4d/T5d is the vertical-motion subtype,
+//     confirming VS cells should pool the VERTICAL EMD signal. Full
+//     per-cell breakdown in NOTES.md's "## Post-M7" section.
+// This is real evidence for a design choice this file already made (HS
+// pools r_horiz, VS pools r_vert) before the connectome was queried - it
+// wasn't guessed backwards from the data.
 //
-// Anatomical grounding used for the band layout:
+// This remains a RATE-BASED approximation, not a spiking simulation, and
+// the band layout (which row/column range feeds which named unit) is still
+// a simplified stand-in for the real dendritic receptive fields (the real
+// per-synapse 3D coordinates needed to reconstruct actual receptive-field
+// shapes live in a separate ~9.5GB per-synapse table that was not pulled
+// down - see NOTES.md for why). What's grounded in real data here is the
+// cell inventory (exact names/counts) and the horizontal/vertical routing;
+// the specific band boundaries below remain an anatomically-motivated
+// simplification, not measured receptive-field maps.
+//
+// Band layout:
 //   - HS cells stratify the lobula plate DORSAL-TO-VENTRAL: this model uses
 //     3 named units (HSN dorsal, HSE equatorial, HSS ventral - matching the
 //     real cell count and naming), each pooling horizontal-motion EMD
 //     columns across its own elevation (row) band only.
 //   - VS cells tile the lobula plate FRONT-TO-BACK (retinotopic azimuth):
-//     this model uses 6 named units (VS1 most frontal through VS6 most
-//     posterior/lateral - Drosophila has 6-8 depending on the source; 6 is
-//     used here for a clean division of a 32-column grid), each pooling
-//     vertical-motion EMD columns across its own azimuth (column) band only.
+//     this model uses 8 named units (VS1 most frontal through VS8 most
+//     posterior/lateral - matching the real, confirmed cell count), each
+//     pooling vertical-motion EMD columns across its own azimuth (column)
+//     band only.
 //
 // Backward-compatibility guarantee: each population's pooled/aggregate value
 // (returned by pool_hs()/pool_vs()) is computed as a per-pixel weighted
@@ -51,7 +73,7 @@ namespace fly_brain {
 class LptcPopulation {
 public:
   static constexpr std::size_t kNumHs = 3;
-  static constexpr std::size_t kNumVs = 6;
+  static constexpr std::size_t kNumVs = 8;
 
   static const std::array<const char*, kNumHs>& hs_names() {
     static const std::array<const char*, kNumHs> kNames{"HSN", "HSE", "HSS"};
@@ -59,8 +81,8 @@ public:
   }
 
   static const std::array<const char*, kNumVs>& vs_names() {
-    static const std::array<const char*, kNumVs> kNames{"VS1", "VS2", "VS3",
-                                                          "VS4", "VS5", "VS6"};
+    static const std::array<const char*, kNumVs> kNames{"VS1", "VS2", "VS3", "VS4",
+                                                          "VS5", "VS6", "VS7", "VS8"};
     return kNames;
   }
 
