@@ -148,28 +148,55 @@ descending_fusion_controller:
     # that, at k_optomotor=100, caused an uncommanded ~145 degree yaw spin in
     # the first ~1-2s of every run. Gate: only trust the optic-flow
     # correction once |z_setpoint - z| < 0.1m (i.e. once actually near-hover)
-    # - cuts the spin to ~50deg (not fully eliminated - see NOTES.md's
+    # - cuts the spin to ~45-56deg (not fully eliminated - see NOTES.md's
     # "## M4" section). A stricter version additionally gating on |z_dot|
     # was tried and REJECTED: it chattered near the threshold and caused a
     # worse, sustained oscillation via rotor-saturation cross-coupling - see
     # descending_fusion_controller.cpp's own comment for the full story.
     optic_flow_altitude_gate: 0.1
+    # Post-M4 fix (see NOTES.md's "## Post-M4" yaw-disturbance-regression
+    # section and descending_fusion_controller.hpp's own comment): ramps the
+    # gate above's correction linearly from 0 to full strength over this many
+    # seconds after it first opens, instead of jumping straight to full
+    # strength. Did NOT reduce the ~45-56deg residual yaw bias itself, but
+    # measurably and reproducibly improved yaw-disturbance recovery time at
+    # the shipped k_optomotor=50 (16.69-16.70s -> 10.26-10.58s, 2 trials each)
+    # and fixed k_optomotor=100's previous run-to-run inconsistency (now a
+    # reproducible 12.03-12.04s, vs. the old hard gate's "7.7s to not-reached"
+    # spread) - see k_optomotor's own comment below for why 50 is still
+    # shipped despite 100 now being consistent.
+    optic_flow_gate_ramp_duration: 1.0
+    # Post-M4 fix, attempt 2 - TRIED AND REJECTED (see NOTES.md's
+    # "## Post-M4" section and descending_fusion_controller.hpp's own
+    # comment): an active heading-hold correction, tried because the ramp
+    # above didn't fix the underlying startup yaw-spin bias, only the
+    # recovery TIME. At BOTH gains tested (2.0 and 0.3) it produced a real,
+    # sustained yaw OSCILLATION (not just a slower settle) - a genuine
+    # structural conflict with the always-active optic-flow optomotor
+    # reflex, which fights ANY commanded rotation (including a deliberate
+    # corrective one) because it cannot distinguish disturbance-induced
+    # rotation from voluntary rotation - real flies solve this with an
+    # efference-copy/corollary-discharge mechanism this project doesn't
+    # have. Left implemented but DISABLED (default off) rather than shipped
+    # broken - a future pass would need that mechanism first.
+    use_heading_hold: false
+    k_heading_hold: 2.0
     k_task_yaw_rate: 1.0
     # NOT the M3-validated value (100.0) - carrying that over unmodified was
     # tried FIRST and re-validated for real against the full fused stack (per
     # M3's own carry-forward TODO: "M4's fusion gains ... should be bisected
     # against the real running system ... not assumed from the M3a bench's
     # clean numbers alone"). At 100.0, yaw-disturbance recovery was
-    # inconsistent across repeated trials against this same disturbance
-    # (7.7s to "not reached in a 20-30s window", with a repeatable secondary
-    # ~0.5 rad/s resurgence around t+10s in the non-converging trials) - a
-    # real, worse-than-M1-baseline result, not a clean win like M2/M3 had.
-    # 50.0 trades away some of the (inconsistent) speed for a monotonic,
-    # non-oscillatory decay with no resurgence - still SLOWER than M1's own
-    # 11.7s baseline recovery on this exact test, but predictable. See
-    # NOTES.md's "## M4" section for the full honest story and numbers -
-    # this is a real, reported regression versus M2/M3's cleaner wins, not
-    # smoothed over.
+    # inconsistent across repeated trials against this same disturbance with
+    # the ORIGINAL hard gate (7.7s to "not reached in a 20-30s window", with a
+    # repeatable secondary ~0.5 rad/s resurgence around t+10s in the
+    # non-converging trials). Re-tested at 100.0 AFTER the ramped-gate fix
+    # above: now reproducible (12.03s, 12.04s) but still slower than 50.0's
+    # 10.26-10.58s, so 50.0 remains the better choice on its own merits, not
+    # just for being the more predictable one. Both are still SLOWER than
+    # M1's own 5.70s baseline recovery on this exact test (see NOTES.md's
+    # "## M4" table) - a real, reported, only partially-closed regression
+    # versus M2/M3's cleaner wins, not smoothed over.
     k_optomotor: 50.0
     # Deliberately inert (0.0) - M3 never validated any field for lateral/
     # longitudinal drift correction, only the yaw/optomotor path - see

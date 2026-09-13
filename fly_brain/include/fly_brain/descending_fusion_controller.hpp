@@ -192,6 +192,52 @@ private:
   // gate-chattering that destabilized the whole stack, a real regression.
   double optic_flow_altitude_gate_ = 0.1;
 
+  // Post-M4 fix (see NOTES.md's "## Post-M4" yaw-disturbance-regression
+  // section): the hard on/off gate above still let a residual climb-transient
+  // burst through at full k_optomotor strength the instant it first opened,
+  // producing the ~45-56deg startup yaw-spin residual. Rather than adding a
+  // SECOND hard threshold condition (the |z_dot| gate above, already tried
+  // and rejected for chattering), this ramps the flow correction's effective
+  // strength linearly from 0 to 1 over optic_flow_gate_ramp_duration_ seconds
+  // AFTER the altitude gate first opens. This is monotonic and one-shot (once
+  // latched open it never re-closes and the ramp only counts up), so it
+  // cannot chatter the way a second AND-gated threshold on a noisy signal
+  // did - it changes how HARD the existing gate opens, not whether a second
+  // condition also has to be true.
+  double optic_flow_gate_ramp_duration_ = 1.0;
+  bool optic_flow_gate_opened_ = false;
+  double time_since_gate_open_ = 0.0;
+
+  // Post-M4 fix, attempt 2 (see NOTES.md's "## Post-M4" section): the ramp
+  // above measurably improved yaw-disturbance RECOVERY TIME but did not fix
+  // the underlying ~45-56deg startup yaw-spin BIAS itself - nothing in this
+  // stack previously had any absolute heading reference at all (yaw_rate_
+  // setpoint_ is a RATE; see descending_fusion.hpp's comment on why that was
+  // previously "architecturally expected" for a pure haltere-reflex analog).
+  // This adds a real, new, active heading-hold correction: capture the
+  // vehicle's yaw at the first valid state sample after activation (the
+  // vehicle spawns level, before any transient has developed), then, once
+  // the SAME altitude gate above opens (reusing optic_flow_gate_opened_ and
+  // the same ramp - one readiness signal shared by both corrections, not a
+  // second timer), actively command a yaw_rate proportional to how far the
+  // current yaw has drifted from that reference. Loosely analogous to the
+  // fly's own central-complex/ellipsoid-body internal heading (compass)
+  // system - a different, more sophisticated real circuit than the
+  // haltere/optomotor reflexes this project otherwise models, not a
+  // biologically-arbitrary addition.
+  //
+  // Deliberately layered BEFORE the phototaxis task-command override below,
+  // not after: that block always fully overwrites task.desired_yaw_rate
+  // (turn-toward-target or search-sweep, no third "leave it alone" case), so
+  // this term is a genuine no-op whenever use_phototaxis_input_ is true -
+  // M5/M6/M7's already-verified behavior is unaffected regardless of this
+  // flag's value. Defaults to false (like use_phototaxis_input_) so only a
+  // config that explicitly opts in (M4's) gets the new loop.
+  bool use_heading_hold_ = false;
+  double k_heading_hold_ = 2.0;
+  double heading_ref_ = 0.0;
+  bool have_heading_ref_ = false;
+
   // M5: optional chained phototaxis input (fly_brain::PhototaxisController) -
   // a real vision-based target-seeking task-command source, layered at the
   // SAME level as the fixed forward_pitch_setpoint_/yaw_rate_setpoint_

@@ -70,6 +70,12 @@ CallbackReturn DescendingFusionController::on_init() {
     // real bug found during M4 verification, not speculative hardening.
     optic_flow_altitude_gate_ =
         auto_declare<double>("optic_flow_altitude_gate", optic_flow_altitude_gate_);
+    // Post-M4 fix - see header comment on optic_flow_gate_ramp_duration_.
+    optic_flow_gate_ramp_duration_ =
+        auto_declare<double>("optic_flow_gate_ramp_duration", optic_flow_gate_ramp_duration_);
+    // Post-M4 fix, attempt 2 - see header comment on use_heading_hold_.
+    use_heading_hold_ = auto_declare<bool>("use_heading_hold", use_heading_hold_);
+    k_heading_hold_ = auto_declare<double>("k_heading_hold", k_heading_hold_);
 
     // M5: optional chained phototaxis (color-target-seeking) input - see
     // header comment and descending_fusion_controller.hpp's own member
@@ -117,6 +123,9 @@ CallbackReturn DescendingFusionController::on_configure(
   have_z_ = false;
   z_integral_ = 0.0;
   prev_err_z_ = 0.0;
+  optic_flow_gate_opened_ = false;
+  time_since_gate_open_ = 0.0;
+  have_heading_ref_ = false;
   free_joint_state_sub_ = get_node()->create_subscription<FreeJointStateArray>(
       "/drone/free_joint_states", rclcpp::SystemDefaultsQoS(),
       std::bind(&DescendingFusionController::free_joint_state_callback, this,
@@ -148,6 +157,9 @@ CallbackReturn DescendingFusionController::on_activate(
   have_z_ = false;
   z_integral_ = 0.0;
   prev_err_z_ = 0.0;
+  optic_flow_gate_opened_ = false;
+  time_since_gate_open_ = 0.0;
+  have_heading_ref_ = false;
   return CallbackReturn::SUCCESS;
 }
 
@@ -189,15 +201,19 @@ controller_interface::return_type DescendingFusionController::update_and_write_c
       if (fj.name == body_name_) {
         z = fj.pose.pose.position.z;
         found_z = true;
-        // M5: also capture world-frame horizontal velocity + current yaw,
-        // for the velocity-damping term below (see its own member comment
-        // in the header for why this is needed) - free, since this topic is
-        // already subscribed for z.
+        // Current yaw - needed unconditionally now (Post-M4 heading-hold
+        // below, use_heading_hold_), not just for M5's velocity-damping term.
+        {
+          const auto& q = fj.pose.pose.orientation;
+          yaw_ = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+        }
+        // M5: also capture world-frame horizontal velocity, for the
+        // velocity-damping term below (see its own member comment in the
+        // header for why this is needed) - free, since this topic is
+        // already subscribed for z/yaw.
         if (use_phototaxis_input_) {
           vx_world_ = fj.twist.twist.linear.x;
           vy_world_ = fj.twist.twist.linear.y;
-          const auto& q = fj.pose.pose.orientation;
-          yaw_ = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
         }
         break;
       }
@@ -205,6 +221,15 @@ controller_interface::return_type DescendingFusionController::update_and_write_c
   }
   if (found_z) {
     have_z_ = true;
+    // Post-M4 heading-hold reference capture - the FIRST valid sample after
+    // activation, before any climb-transient yaw-spin has had a chance to
+    // develop (the vehicle spawns level - see NOTES.md's "## M0"/"## M2"
+    // sections), not re-captured after that. See use_heading_hold_'s header
+    // comment.
+    if (use_heading_hold_ && !have_heading_ref_) {
+      heading_ref_ = yaw_;
+      have_heading_ref_ = true;
+    }
   } else if (!have_z_) {
     // No /drone/free_joint_states sample yet (e.g. the first few cycles
     // after activation) - write a safe hover-feedforward fallback rather
@@ -265,10 +290,49 @@ controller_interface::return_type DescendingFusionController::update_and_write_c
   // The single-condition altitude-error gate below doesn't chatter (err_z
   // decreases monotonically during the one-time climb, so the gate opens
   // exactly once and stays open) and is what's actually shipped.
+  // Post-M4 fix (see header comment on optic_flow_gate_ramp_duration_ and
+  // NOTES.md's "## Post-M4" section): the gate above still let the full
+  // correction through the instant it first opened, which is what produced
+  // the ~45-56deg startup yaw-spin residual (a real climb-transient burst
+  // still present right at the gate-open instant, just below the altitude
+  // threshold). Latch the gate open (never re-close it - err_z decreases
+  // monotonically during the one-time climb, so it opens exactly once) and
+  // ramp the correction's effective strength linearly from 0 to 1 over the
+  // following optic_flow_gate_ramp_duration_ seconds, instead of jumping
+  // straight to full strength.
+  // Gate/ramp readiness signal - shared by the optic-flow correction below
+  // AND the Post-M4 heading-hold term (see its own header comment), not
+  // recomputed twice. Latches open once (err_z decreases monotonically
+  // during the one-time climb, so this can only transition false->true
+  // once) and ramps 0->1 over optic_flow_gate_ramp_duration_ seconds after
+  // that, rather than exposing either correction to a step at gate-open.
+  if (!optic_flow_gate_opened_ && std::abs(err_z) < optic_flow_altitude_gate_) {
+    optic_flow_gate_opened_ = true;
+    time_since_gate_open_ = 0.0;
+  }
+  double ramp = 0.0;
+  if (optic_flow_gate_opened_) {
+    time_since_gate_open_ += dt;
+    ramp = optic_flow_gate_ramp_duration_ > 0.0
+               ? std::min(1.0, time_since_gate_open_ / optic_flow_gate_ramp_duration_)
+               : 1.0;
+  }
+
   double flow_signal = 0.0;
-  if (use_optic_flow_input_ && command_interfaces_.size() > kNumHaltereInterfaces &&
-      std::abs(err_z) < optic_flow_altitude_gate_) {
-    flow_signal = command_interfaces_[kNumHaltereInterfaces].get_optional<double>().value_or(0.0);
+  if (use_optic_flow_input_ && command_interfaces_.size() > kNumHaltereInterfaces) {
+    flow_signal =
+        ramp * command_interfaces_[kNumHaltereInterfaces].get_optional<double>().value_or(0.0);
+  }
+
+  // Post-M4 heading-hold term - see use_heading_hold_'s header comment.
+  // Angle-wrapped so a reference near +-pi doesn't produce a spurious
+  // near-2*pi error the one time yaw_ crosses the wrap boundary.
+  double heading_hold_yaw_rate = 0.0;
+  if (use_heading_hold_ && have_heading_ref_) {
+    double angle_diff = heading_ref_ - yaw_;
+    while (angle_diff > M_PI) angle_diff -= 2.0 * M_PI;
+    while (angle_diff < -M_PI) angle_diff += 2.0 * M_PI;
+    heading_hold_yaw_rate = ramp * k_heading_hold_ * angle_diff;
   }
 
   fly_brain::TaskCommand task;
@@ -278,7 +342,7 @@ controller_interface::return_type DescendingFusionController::update_and_write_c
   // drive this dynamically with no change needed here - see
   // on_export_reference_interfaces_list()'s comment.
   task.desired_pitch = task_forward_pitch_ref_->get_optional<double>().value_or(forward_pitch_setpoint_);
-  task.desired_yaw_rate = yaw_rate_setpoint_;
+  task.desired_yaw_rate = yaw_rate_setpoint_ + heading_hold_yaw_rate;
   task.desired_thrust = thrust;
 
   // M5: phototaxis (color-target-seeking) task-command override - layered at

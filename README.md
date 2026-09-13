@@ -129,7 +129,7 @@ isolation, from `m0_bringup` through `m7_house_flight` in `fly_simulation/launch
 | M1 | `m1_baseline_hover.launch.py` | Conventional PID hover (the baseline) | Holds z=0.500m within a few mm, no oscillation |
 | M2 | `m2_haltere_stabilization.launch.py` | Haltere gyro reflex vs. a roll disturbance | Recovers in **0.53s**, vs. baseline's >12s (unrecovered) |
 | M3 | `m3_optomotor_demo.launch.py` | Live optic-flow yaw correction, chained onto M2 | Real EMD signal, ~6-7% faster yaw recovery (honest, modest effect) |
-| M4 | `m4_full_flight.launch.py` | Full fusion: haltere + vision + closed-loop altitude hold | Altitude hold exact (0.500m); yaw recovery is an open regression (16.7s vs. M1's 5.70s) |
+| M4 | `m4_full_flight.launch.py` | Full fusion: haltere + vision + closed-loop altitude hold | Altitude hold exact (0.500m); yaw recovery improved to ~10.3-10.6s (was 16.7s) via a ramped optic-flow gate, still short of M1's 5.70s |
 | M5 | `m5_phototaxis.launch.py` | Vision-only "phototaxis": color-blob detection of a bright attractant, fused into turn-toward/approach | Distance to target dropped from 3.000m (spawn) to ~0.88-0.92m (converged hover) |
 | M6 | `m6_moving_target.launch.py` | Continuous chase: target teleports on approach | 24 relocate-and-rechase cycles verified, re-detection consistently <200ms |
 | M7 | `m7_house_flight.launch.py` | Vision-guided navigation through a 3-room house (door + elevated window) | Full journey ~30s, real wall occlusion confirmed (target invisible until line-of-sight exists) |
@@ -141,9 +141,11 @@ honestly-reported result, including the ones that didn't work cleanly.
 
 ## Known open issues
 
-- **M4 yaw-disturbance recovery regressed** relative to M2/M3 (16.7s vs.
-  5.70s baseline), likely from an un-tuned `k_optomotor` for the full fused
-  stack plus a startup yaw-spin bug.
+- **M4 yaw-disturbance recovery is still slower than M1's baseline** (5.70s):
+  a ramped optic-flow gate (see NOTES.md's "## Post-M4" section) improved it
+  from 16.7s to a reproducible ~10.3-10.6s, but the underlying startup
+  yaw-spin bias (~45-56 degrees) that likely still bounds it below M1's
+  baseline was not fixed by that change.
 - **Control loop runs at 100Hz**, not the ~500Hz originally targeted for a
   haltere-speed reflex (bounded by the MJCF's `timestep`), and this was
   never revisited.
