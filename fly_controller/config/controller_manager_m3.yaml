@@ -1,0 +1,135 @@
+# M3-specific controller_manager config - a deliberate FULL COPY of
+# controller_manager.yaml (not a layered/merged override file). Reason: the
+# ros2_control_node/spawner --param-file mechanism used by M0-M2's launch
+# files was not confirmed to reliably merge multiple --param-file layers for
+# this jazzy build (vs. just using the last one), so rather than guess at
+# undocumented merge semantics, M3 gets its own complete, self-contained
+# config - identical to controller_manager.yaml for imu_sensor_broadcaster/
+# baseline_pid_controller, plus: (a) haltere_reflex_controller's 3 new
+# use_optic_flow_yaw_input/optic_flow_yaw_interface_name/optic_flow_yaw_gain
+# parameters (all default-off in controller_manager.yaml, so M1/M2's shared
+# file and launches are completely untouched by this file's existence), and
+# (b) a new optic_flow_controller entry. See NOTES.md's "## M3" section.
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+
+    imu_sensor_broadcaster:
+      type: imu_sensor_broadcaster/IMUSensorBroadcaster
+
+    baseline_pid_controller:
+      type: fly_controller/BaselinePidController
+
+    haltere_reflex_controller:
+      type: fly_brain/HaltereReflexController
+
+    # M3: optic-flow-analog visual reflex controller (fly_brain package).
+    # Chainable, but a pure perception leaf - see NOTES.md's "## M3" section
+    # and fly_brain/include/fly_brain/optic_flow_controller.hpp.
+    optic_flow_controller:
+      type: fly_brain/OpticFlowController
+
+imu_sensor_broadcaster:
+  ros__parameters:
+    sensor_name: imu
+    frame_id: x2
+
+baseline_pid_controller:
+  ros__parameters:
+    body_name: x2
+    z_setpoint: 0.5
+    mass: 1.325
+    min_thrust_per_rotor: 0.0
+    max_thrust_per_rotor: 13.0
+    drag_to_thrust: 0.0201
+    complementary_filter_alpha: 0.98
+    kp_z: 12.0
+    ki_z: 2.0
+    kd_z: 8.0
+    kp_att_roll: 6.0
+    kp_att_pitch: 6.0
+    kp_rate_x: 0.08
+    kd_rate_x: 0.004
+    kp_rate_y: 0.08
+    kd_rate_y: 0.004
+    kp_rate_z: 0.06
+    kd_rate_z: 0.003
+
+haltere_reflex_controller:
+  ros__parameters:
+    mass: 1.325
+    min_thrust_per_rotor: 0.0
+    max_thrust_per_rotor: 13.0
+    drag_to_thrust: 0.0201
+    complementary_filter_alpha: 0.98
+
+    standalone_roll_setpoint: 0.0
+    standalone_pitch_setpoint: 0.0
+    standalone_yaw_rate_setpoint: 0.0
+    # M3-specific: a much smaller climb margin than M2's 13.258 (2% over
+    # hover) - see NOTES.md's "## M3" section. A real confound was found
+    # empirically: M2's 2% margin climbs fast enough (tens of meters over a
+    # full run) that within a few seconds of a yaw disturbance the ground
+    # plane recedes enough for the resulting vertical/receding optic flow
+    # (from climbing alone, present in EVERY run regardless of disturbance
+    # direction) to swamp the much smaller yaw-rotation signal - confirmed by
+    # a same-sign-regardless-of-disturbance-direction result on BOTH
+    # "roll_drift" and "forward_drift" (should flip sign; didn't) until this
+    # was reduced. 13.06 N (~0.46% margin, vs 13.258's 2%) still clears the
+    # ground-tip-over failure mode M2 documented (this test always applies a
+    # real disturbance within ~1s of activation, unlike M2's "zero
+    # disturbance for 10s" tip-over scenario) while keeping the drone below
+    # ~6m for the whole ~15s test window.
+    standalone_thrust_setpoint: 13.06
+
+    kp_att_roll: 12.0
+    kp_att_pitch: 12.0
+    kp_rate_x: 0.4
+    kd_rate_x: 0.02
+    kp_rate_y: 0.4
+    kd_rate_y: 0.02
+    kp_rate_z: 0.06
+    kd_rate_z: 0.003
+
+    # M3: chain in OpticFlowController's yaw-tracking reference interface as
+    # an additive correction to the effective yaw-rate setpoint (the
+    # "optomotor" term of the future DescendingFusionController's fusion law,
+    # exercised directly here - see NOTES.md's "## M3" section - and
+    # fly_brain/include/fly_brain/haltere_reflex_controller.hpp).
+    #
+    # Source interface is "roll_drift", NOT "forward_drift" and NOT
+    # "yaw_rate" - a second real naming/physics surprise on top of the first
+    # (see NOTES.md's "## M3" section in full, including an HONEST caveat):
+    # the M3a analytic bench (test/test_analytic_flow_bench.cpp) modeled an
+    # idealized horizon-level panoramic camera, for which "forward_drift"'s
+    # same-sign horizontal pooling is what a pure yaw rotation excites. The
+    # REAL nose_cam is tilted ~18deg downward at a NEARBY textured ground
+    # plane in full perspective (not a panorama), and empirically
+    # "roll_drift" carried a visibly larger, more repeatable disturbance-
+    # correlated signal than "forward_drift" across repeated A/B trials of
+    # the full recovery curve - but NEITHER field cleanly passed a strict
+    # short-window sign-reversal check (see NOTES.md): the live signal is
+    # noisier and more phase/timing-sensitive than the idealized bench
+    # predicts, most likely coarse-grid (32x32) spatial aliasing against the
+    # ground checker texture plus startup-transient contamination in the
+    # short window available before climb-altitude confounds the
+    # measurement. roll_drift was still the better empirical choice of the
+    # two by every full-recovery-curve trial run.
+    use_optic_flow_yaw_input: true
+    optic_flow_yaw_interface_name: "optic_flow_controller/roll_drift"
+    # Tuned empirically against the real running system (see NOTES.md's
+    # "## M3" section for the full gain-search log, including a real
+    # closed-loop-delay self-oscillation instability found at higher gains
+    # with the *previous* (forward_drift, low-contrast-texture) attempt).
+    optic_flow_yaw_gain: 100.0
+
+optic_flow_controller:
+  ros__parameters:
+    image_topic: "/drone/camera/image_raw"
+    grid_width: 32
+    grid_height: 32
+    # Low-pass time constant for the EMD's delay line - matches the value
+    # already validated in fly_brain's own synthetic tests (test_algorithms.
+    # cpp's test_reichardt_emd and test/test_analytic_flow_bench.cpp both use
+    # tau=0.05).
+    tau: 0.05
