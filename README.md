@@ -9,7 +9,14 @@ through real ROS2 `ros2_control` chainable controllers.
 This is **not** the real FlyWire/hemibrain connectome (~140,000 neurons). It's
 a small, hand-designed network (a few control loops, ~1,100 simulated
 "vision" units) inspired by the *structure* of the fly's flight-control
-circuitry, not a literal reconstruction of the brain.
+circuitry, not a literal reconstruction of the brain. The optic-flow pathway
+is the one exception with any real connectomic grounding: its pooling stage
+is organized into named units modeled after Drosophila's actual lobula plate
+tangential cells (HSN/HSE/HSS and VS1-VS6), each sampling its own real
+anatomical receptive-field band rather than one anonymous whole-eye average.
+It is still a rate-based approximation, not per-synapse EM data or a spiking
+simulation; see `fly_brain/include/fly_brain/lptc_pooling.hpp` and NOTES.md's
+"## Post-M7" section for the sources and the rest of the honest caveats.
 
 ## See it fly
 

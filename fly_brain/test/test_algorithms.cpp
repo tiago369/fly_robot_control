@@ -148,6 +148,72 @@ void test_reichardt_emd() {
               last2.forward_drift);
 }
 
+void test_lptc_pooling() {
+  // Confirms fly_brain::LptcPopulation's named HS/VS units are actually
+  // spatially localized to their assigned receptive-field band (not just an
+  // aliased whole-grid average under a new name) - see lptc_pooling.hpp's
+  // header comment for the HSN/HSE/HSS (dorsal/equatorial/ventral) and
+  // VS1-VS6 (frontal-to-posterior azimuth) band layout.
+  //
+  // Stimulus: a converging/diverging ("looming-like") pattern - the grating
+  // drifts one way on one half of the band and the opposite way on the
+  // other half - confined to a single band. This is deliberately NOT a
+  // uniform single-direction drift: per test_analytic_flow_bench.cpp's M3a
+  // finding, a uniform drift produces near-zero antisymmetric-pooled
+  // response (it's what "forward_drift"'s symmetric pooling picks up
+  // instead), so it wouldn't exercise HS/VS's antisymmetric pooling at all.
+  const std::size_t w = 24, h = 24;  // divides evenly into 3 HS rows-bands and 6 VS column-bands
+  const double dt = 1.0 / 60.0;
+  const double speed = 6.0;
+
+  // HS check: converging pattern confined to rows [0, 8) - HSN's band.
+  {
+    ReichardtEmdArray emd(w, h, 0.05);
+    double phase_left = 0.0, phase_right = 0.0;
+    const double cx = (static_cast<double>(w) - 1.0) / 2.0;
+    for (int i = 0; i < 30; ++i) {
+      std::vector<float> img(w * h, 0.5f);
+      for (std::size_t y = 0; y < 8; ++y) {
+        for (std::size_t x = 0; x < w; ++x) {
+          const double phase = (static_cast<double>(x) - cx) >= 0 ? phase_right : phase_left;
+          img[y * w + x] = static_cast<float>(
+              0.5 + 0.5 * std::sin(2.0 * M_PI * (static_cast<double>(x) / 4.0) + phase));
+        }
+      }
+      emd.update(img, dt);
+      phase_left += speed * dt;
+      phase_right -= speed * dt;
+    }
+    const auto& hs = emd.hs_activity();
+    CHECK(std::abs(hs[0]) > 5.0 * std::abs(hs[1]));  // HSN (dorsal, stimulated) >> HSE
+    CHECK(std::abs(hs[0]) > 5.0 * std::abs(hs[2]));  // HSN (dorsal, stimulated) >> HSS
+    std::printf("test_lptc_pooling HS done (HSN=%.6f HSE=%.6f HSS=%.6f)\n", hs[0], hs[1], hs[2]);
+  }
+
+  // VS check: converging pattern confined to columns [0, 4) - VS1's band.
+  {
+    ReichardtEmdArray emd(w, h, 0.05);
+    double phase_top = 0.0, phase_bottom = 0.0;
+    const double cy = (static_cast<double>(h) - 1.0) / 2.0;
+    for (int i = 0; i < 30; ++i) {
+      std::vector<float> img(w * h, 0.5f);
+      for (std::size_t x = 0; x < 4; ++x) {
+        for (std::size_t y = 0; y < h; ++y) {
+          const double phase = (static_cast<double>(y) - cy) >= 0 ? phase_bottom : phase_top;
+          img[y * w + x] = static_cast<float>(
+              0.5 + 0.5 * std::sin(2.0 * M_PI * (static_cast<double>(y) / 4.0) + phase));
+        }
+      }
+      emd.update(img, dt);
+      phase_top += speed * dt;
+      phase_bottom -= speed * dt;
+    }
+    const auto& vs = emd.vs_activity();
+    CHECK(std::abs(vs[0]) > 5.0 * std::abs(vs[5]));  // VS1 (frontal, stimulated) >> VS6
+    std::printf("test_lptc_pooling VS done (VS1=%.6f VS6=%.6f)\n", vs[0], vs[5]);
+  }
+}
+
 void test_descending_fusion() {
   // M4: DescendingFusion::fuse()'s optomotor term reads flow.roll_drift, NOT
   // flow.yaw_rate - see descending_fusion.hpp's own doc comment (and
@@ -295,6 +361,7 @@ int main() {
   test_haltere_reflex();
   test_cascaded_pid();
   test_reichardt_emd();
+  test_lptc_pooling();
   test_descending_fusion();
   test_color_blob_detector();
 
