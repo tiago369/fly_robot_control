@@ -1,0 +1,164 @@
+# M5-specific controller_manager config - a deliberate FULL COPY of
+# controller_manager_m4.yaml (not a layered/merged override file), matching
+# M3/M4's own established discipline (see controller_manager_m3.yaml's header
+# comment: the ros2_control_node/spawner --param-file mechanism wasn't
+# confirmed to reliably merge multiple --param-file layers for this jazzy
+# build, so a self-contained file per milestone is unambiguous and easy to
+# reason about at the cost of some duplication). Identical to
+# controller_manager_m4.yaml for imu_sensor_broadcaster/baseline_pid_controller/
+# optic_flow_controller/haltere_reflex_controller, plus: (a) a new
+# phototaxis_controller entry (fly_brain::PhototaxisController, M5), and (b)
+# descending_fusion_controller's new use_phototaxis_input_/k_phototaxis_yaw_/
+# etc. parameters (see fly_brain/include/fly_brain/descending_fusion_controller.hpp).
+# M1-M4's own config files (controller_manager.yaml, controller_manager_m3.yaml,
+# controller_manager_m4.yaml) are completely untouched by this milestone - see
+# NOTES.md's "## M5" section.
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+
+    imu_sensor_broadcaster:
+      type: imu_sensor_broadcaster/IMUSensorBroadcaster
+
+    baseline_pid_controller:
+      type: fly_controller/BaselinePidController
+
+    haltere_reflex_controller:
+      type: fly_brain/HaltereReflexController
+
+    optic_flow_controller:
+      type: fly_brain/OpticFlowController
+
+    # M5: color-based static-target ("phototaxis") perception controller -
+    # see NOTES.md's "## M5" section and
+    # fly_brain/include/fly_brain/phototaxis_controller.hpp.
+    phototaxis_controller:
+      type: fly_brain/PhototaxisController
+
+    descending_fusion_controller:
+      type: fly_brain/DescendingFusionController
+
+imu_sensor_broadcaster:
+  ros__parameters:
+    sensor_name: imu
+    frame_id: x2
+
+baseline_pid_controller:
+  ros__parameters:
+    body_name: x2
+    z_setpoint: 0.5
+    mass: 1.325
+    min_thrust_per_rotor: 0.0
+    max_thrust_per_rotor: 13.0
+    drag_to_thrust: 0.0201
+    complementary_filter_alpha: 0.98
+    kp_z: 12.0
+    ki_z: 2.0
+    kd_z: 8.0
+    kp_att_roll: 6.0
+    kp_att_pitch: 6.0
+    kp_rate_x: 0.08
+    kd_rate_x: 0.004
+    kp_rate_y: 0.08
+    kd_rate_y: 0.004
+    kp_rate_z: 0.06
+    kd_rate_z: 0.003
+
+haltere_reflex_controller:
+  ros__parameters:
+    mass: 1.325
+    min_thrust_per_rotor: 0.0
+    max_thrust_per_rotor: 13.0
+    drag_to_thrust: 0.0201
+    complementary_filter_alpha: 0.98
+
+    # M4/M5: standalone_* setpoints below are UNUSED in practice -
+    # DescendingFusionController claims this controller's roll/pitch/
+    # yaw_rate/thrust reference interfaces directly once chained (see
+    # NOTES.md's "## M2" section). Left populated anyway purely so this
+    # controller still behaves sanely if launched standalone for debugging.
+    standalone_roll_setpoint: 0.0
+    standalone_pitch_setpoint: 0.0
+    standalone_yaw_rate_setpoint: 0.0
+    standalone_thrust_setpoint: 13.06
+
+    kp_att_roll: 12.0
+    kp_att_pitch: 12.0
+    kp_rate_x: 0.4
+    kd_rate_x: 0.02
+    kp_rate_y: 0.4
+    kd_rate_y: 0.02
+    kp_rate_z: 0.06
+    kd_rate_z: 0.003
+
+    # M4/M5: DescendingFusionController claims optic_flow_controller/
+    # roll_drift directly and does the fusion itself - HaltereReflexController's
+    # own M3 bolt-on stays disabled here (see controller_manager_m4.yaml's own
+    # header comment).
+    use_optic_flow_yaw_input: false
+    optic_flow_yaw_interface_name: "optic_flow_controller/roll_drift"
+    optic_flow_yaw_gain: 100.0
+
+optic_flow_controller:
+  ros__parameters:
+    image_topic: "/drone/camera/image_raw"
+    grid_width: 32
+    grid_height: 32
+    tau: 0.05
+
+# M5: fly_brain::PhototaxisController - color-threshold blob detector run
+# against /drone/camera/image_raw. Target color matches the attractant
+# sphere's real MJCF material rgba (fly_controller/models/skydio_x2/
+# drone_scene.xml's "attractant_material", rgba="0.92 0.27 0.08 1") converted
+# to 0-255 rgb8 (0.92*255=235, 0.27*255=70, 0.08*255=20) - the exact same
+# numbers as fly_brain::ColorThreshold's compiled-in defaults
+# (color_blob_detector.hpp), declared explicitly here anyway so the
+# live-vs-rendered-color correspondence is visible in one place rather than
+# relying on two separate files' defaults silently agreeing.
+phototaxis_controller:
+  ros__parameters:
+    image_topic: "/drone/camera/image_raw"
+    target_r: 235
+    target_g: 70
+    target_b: 20
+    color_tolerance: 70
+    min_channel_spread: 50
+    min_blob_pixels: 12
+
+descending_fusion_controller:
+  ros__parameters:
+    body_name: x2
+    haltere_controller_name: "haltere_reflex_controller"
+    mass: 1.325
+
+    z_setpoint: 0.5
+    kp_z: 12.0
+    ki_z: 2.0
+    kd_z: 8.0
+
+    # M5: the fixed task command below is now only a FALLBACK - see
+    # use_phototaxis_input below. Left at pure-hover (0.0) so a fresh launch
+    # with phototaxis disabled still behaves exactly like M4.
+    forward_pitch_setpoint: 0.0
+    yaw_rate_setpoint: 0.0
+
+    use_optic_flow_input: true
+    optic_flow_source_interface: "optic_flow_controller/roll_drift"
+    optic_flow_altitude_gate: 0.1
+    k_task_yaw_rate: 1.0
+    k_optomotor: 50.0
+    k_drift_roll: 0.0
+    k_drift_pitch: 0.0
+
+    # M5: real vision-based target-seeking ("phototaxis") - see
+    # fly_brain/include/fly_brain/descending_fusion_controller.hpp's own
+    # member comments for the exact law, and NOTES.md's "## M5" section for
+    # how these numbers were arrived at (bisected against the real running
+    # system, same discipline as M3's optic_flow_yaw_gain and M4's
+    # k_optomotor - not guessed).
+    use_phototaxis_input: true
+    phototaxis_controller_name: "phototaxis_controller"
+    k_phototaxis_yaw: 1.2
+    phototaxis_forward_pitch: 0.08
+    phototaxis_stop_area_fraction: 0.08
+    phototaxis_search_yaw_rate: 0.3
