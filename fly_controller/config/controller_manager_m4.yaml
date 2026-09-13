@@ -1,0 +1,178 @@
+# M4-specific controller_manager config - a deliberate FULL COPY of
+# controller_manager_m3.yaml (not a layered/merged override file), matching
+# M3's own established discipline (see that file's header comment: the
+# ros2_control_node/spawner --param-file mechanism wasn't confirmed to
+# reliably merge multiple --param-file layers for this jazzy build, so a
+# self-contained file per milestone is unambiguous and easy to reason about
+# at the cost of some duplication). Identical to controller_manager_m3.yaml
+# for imu_sensor_broadcaster/baseline_pid_controller/optic_flow_controller,
+# plus: (a) haltere_reflex_controller's use_optic_flow_yaw_input flipped back
+# to false (DescendingFusionController now owns the optic-flow fusion
+# directly - see NOTES.md's "## M3" TODO for M4 and its own "## M4" section),
+# and (b) a new descending_fusion_controller entry. See NOTES.md's "## M4"
+# section.
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+
+    imu_sensor_broadcaster:
+      type: imu_sensor_broadcaster/IMUSensorBroadcaster
+
+    baseline_pid_controller:
+      type: fly_controller/BaselinePidController
+
+    haltere_reflex_controller:
+      type: fly_brain/HaltereReflexController
+
+    optic_flow_controller:
+      type: fly_brain/OpticFlowController
+
+    # M4: descending-fusion controller (fly_brain package) - the top of the
+    # fly-brain chain. Chainable, but nothing chains into ITS reference
+    # interfaces (it exports none) - see NOTES.md's "## M4" section and
+    # fly_brain/include/fly_brain/descending_fusion_controller.hpp.
+    descending_fusion_controller:
+      type: fly_brain/DescendingFusionController
+
+imu_sensor_broadcaster:
+  ros__parameters:
+    sensor_name: imu
+    frame_id: x2
+
+baseline_pid_controller:
+  ros__parameters:
+    body_name: x2
+    z_setpoint: 0.5
+    mass: 1.325
+    min_thrust_per_rotor: 0.0
+    max_thrust_per_rotor: 13.0
+    drag_to_thrust: 0.0201
+    complementary_filter_alpha: 0.98
+    kp_z: 12.0
+    ki_z: 2.0
+    kd_z: 8.0
+    kp_att_roll: 6.0
+    kp_att_pitch: 6.0
+    kp_rate_x: 0.08
+    kd_rate_x: 0.004
+    kp_rate_y: 0.08
+    kd_rate_y: 0.004
+    kp_rate_z: 0.06
+    kd_rate_z: 0.003
+
+haltere_reflex_controller:
+  ros__parameters:
+    mass: 1.325
+    min_thrust_per_rotor: 0.0
+    max_thrust_per_rotor: 13.0
+    drag_to_thrust: 0.0201
+    complementary_filter_alpha: 0.98
+
+    # M4: standalone_* setpoints below are now UNUSED in practice -
+    # DescendingFusionController claims this controller's roll/pitch/
+    # yaw_rate/thrust reference interfaces directly once chained, which
+    # puts this controller into chained mode and means update_reference_
+    # from_subscribers() (the only place these standalone_* parameters are
+    # read) never runs (see NOTES.md's "## M2" section: that method only
+    # runs when NOT is_in_chained_mode()). Left populated anyway (same
+    # values as controller_manager_m3.yaml) purely so this controller still
+    # behaves sanely if launched standalone against this config file for
+    # debugging.
+    standalone_roll_setpoint: 0.0
+    standalone_pitch_setpoint: 0.0
+    standalone_yaw_rate_setpoint: 0.0
+    standalone_thrust_setpoint: 13.06
+
+    kp_att_roll: 12.0
+    kp_att_pitch: 12.0
+    kp_rate_x: 0.4
+    kd_rate_x: 0.02
+    kp_rate_y: 0.4
+    kd_rate_y: 0.02
+    kp_rate_z: 0.06
+    kd_rate_z: 0.003
+
+    # M4: DescendingFusionController now claims optic_flow_controller/
+    # roll_drift directly and does the fusion itself - HaltereReflexController's
+    # own M3 bolt-on is disabled (false) here to avoid double-applying the
+    # optic-flow yaw correction (once via this parameter, once via
+    # DescendingFusionController's own k_optomotor term) - see NOTES.md's
+    # "## M3" TODO for M4 ("M4's real DescendingFusionController should
+    # supersede it... rather than building on top of it") and this file's own
+    # header comment.
+    use_optic_flow_yaw_input: false
+    optic_flow_yaw_interface_name: "optic_flow_controller/roll_drift"
+    optic_flow_yaw_gain: 100.0
+
+optic_flow_controller:
+  ros__parameters:
+    image_topic: "/drone/camera/image_raw"
+    grid_width: 32
+    grid_height: 32
+    tau: 0.05
+
+descending_fusion_controller:
+  ros__parameters:
+    body_name: x2
+    haltere_controller_name: "haltere_reflex_controller"
+    mass: 1.325
+
+    # Real closed-loop altitude hold (the M4 brief's explicit ask) - same
+    # gains BaselinePidController (M1) validated against this exact plant
+    # (see NOTES.md's "## M1" section), not re-derived from scratch.
+    z_setpoint: 0.5
+    kp_z: 12.0
+    ki_z: 2.0
+    kd_z: 8.0
+
+    # Task command: pure hover by default (0.0 forward pitch). No runtime
+    # override mechanism was built for this (would need either a second
+    # ParameterFile or a live `ros2 param set` - both more machinery than the
+    # M4 brief's "don't over-build this" task-command guidance calls for) -
+    # a forward-flight run is exercised by editing this value directly and
+    # relaunching, the same edit-yaml-and-relaunch iteration loop M1-M3 used
+    # for their own gain tuning.
+    forward_pitch_setpoint: 0.0
+    yaw_rate_setpoint: 0.0
+
+    # Optic-flow fusion - see descending_fusion.hpp's own doc comment for the
+    # field-naming resolution (k_optomotor multiplies flow.roll_drift, not
+    # flow.yaw_rate) and this file's header comment for why
+    # haltere_reflex_controller's own bolt-on is disabled above.
+    use_optic_flow_input: true
+    optic_flow_source_interface: "optic_flow_controller/roll_drift"
+    # Real bug found during M4 verification (see NOTES.md's "## M4" section):
+    # left ungated, the unavoidable initial climb-from-spawn transient (even
+    # with a real closed-loop altitude PID, unlike M2/M3's open-loop hack)
+    # produced a large receding-ground optic-flow burst on flow.roll_drift
+    # that, at k_optomotor=100, caused an uncommanded ~145 degree yaw spin in
+    # the first ~1-2s of every run. Gate: only trust the optic-flow
+    # correction once |z_setpoint - z| < 0.1m (i.e. once actually near-hover)
+    # - cuts the spin to ~50deg (not fully eliminated - see NOTES.md's
+    # "## M4" section). A stricter version additionally gating on |z_dot|
+    # was tried and REJECTED: it chattered near the threshold and caused a
+    # worse, sustained oscillation via rotor-saturation cross-coupling - see
+    # descending_fusion_controller.cpp's own comment for the full story.
+    optic_flow_altitude_gate: 0.1
+    k_task_yaw_rate: 1.0
+    # NOT the M3-validated value (100.0) - carrying that over unmodified was
+    # tried FIRST and re-validated for real against the full fused stack (per
+    # M3's own carry-forward TODO: "M4's fusion gains ... should be bisected
+    # against the real running system ... not assumed from the M3a bench's
+    # clean numbers alone"). At 100.0, yaw-disturbance recovery was
+    # inconsistent across repeated trials against this same disturbance
+    # (7.7s to "not reached in a 20-30s window", with a repeatable secondary
+    # ~0.5 rad/s resurgence around t+10s in the non-converging trials) - a
+    # real, worse-than-M1-baseline result, not a clean win like M2/M3 had.
+    # 50.0 trades away some of the (inconsistent) speed for a monotonic,
+    # non-oscillatory decay with no resurgence - still SLOWER than M1's own
+    # 11.7s baseline recovery on this exact test, but predictable. See
+    # NOTES.md's "## M4" section for the full honest story and numbers -
+    # this is a real, reported regression versus M2/M3's cleaner wins, not
+    # smoothed over.
+    k_optomotor: 50.0
+    # Deliberately inert (0.0) - M3 never validated any field for lateral/
+    # longitudinal drift correction, only the yaw/optomotor path - see
+    # descending_fusion.hpp's doc comment.
+    k_drift_roll: 0.0
+    k_drift_pitch: 0.0
