@@ -1,7 +1,10 @@
 #pragma once
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <vector>
+
+#include "fly_brain/lptc_pooling.hpp"
 
 namespace fly_brain {
 
@@ -16,8 +19,11 @@ struct OpticFlowEstimate {
 // grayscale grid (real ommatidia are far coarser than camera pixel counts).
 // Each detector delay-and-correlates two neighboring luminance signals and
 // mirror-subtracts to cancel non-motion flicker, producing a direction-
-// opponent response. Pooled with antisymmetric/symmetric spatial weights to
-// mimic LPTC (HS/VS-cell) self-motion estimators.
+// opponent response. yaw_rate/roll_drift are pooled by fly_brain::
+// LptcPopulation into named HSN/HSE/HSS and VS1-VS6 units (see
+// lptc_pooling.hpp for the anatomical grounding); forward_drift/
+// vertical_drift remain a plain symmetric whole-grid average (no
+// well-characterized public LPTC mapping was used for those two).
 class ReichardtEmdArray {
 public:
   ReichardtEmdArray(std::size_t width, std::size_t height, double tau)
@@ -67,29 +73,30 @@ public:
     }
 
     OpticFlowEstimate est;
-    const double cx = (static_cast<double>(w_) - 1.0) / 2.0;
-    const double cy = (static_cast<double>(h_) - 1.0) / 2.0;
+    est.yaw_rate = LptcPopulation::pool_hs(r_horiz, w_, h_, hs_activity_);
+    est.roll_drift = LptcPopulation::pool_vs(r_vert, w_, h_, vs_activity_);
+
     double norm = 0.0;
     for (std::size_t y = 0; y < h_; ++y) {
       for (std::size_t x = 0; x < w_; ++x) {
         const std::size_t idx = y * w_ + x;
-        const double sign_x = (static_cast<double>(x) - cx) >= 0 ? 1.0 : -1.0;
-        const double sign_y = (static_cast<double>(y) - cy) >= 0 ? 1.0 : -1.0;
-        est.yaw_rate += sign_x * r_horiz[idx];
         est.forward_drift += r_horiz[idx];
-        est.roll_drift += sign_y * r_vert[idx];
         est.vertical_drift += r_vert[idx];
         norm += 1.0;
       }
     }
     if (norm > 0.0) {
-      est.yaw_rate /= norm;
       est.forward_drift /= norm;
-      est.roll_drift /= norm;
       est.vertical_drift /= norm;
     }
     return est;
   }
+
+  // Per-cell HS (HSN/HSE/HSS) and VS (VS1-VS6) activations from the most
+  // recent update() call, in fly_brain::LptcPopulation::hs_names()/
+  // vs_names() order. See lptc_pooling.hpp.
+  const std::array<double, LptcPopulation::kNumHs>& hs_activity() const { return hs_activity_; }
+  const std::array<double, LptcPopulation::kNumVs>& vs_activity() const { return vs_activity_; }
 
   // Per-cell |horizontal EMD response| + |vertical EMD response| from the
   // most recent update() call, row-major, size width()*height(). For
@@ -104,6 +111,8 @@ private:
   std::vector<float> lp_;
   std::vector<float> last_activity_;
   bool initialized_;
+  std::array<double, LptcPopulation::kNumHs> hs_activity_{};
+  std::array<double, LptcPopulation::kNumVs> vs_activity_{};
 };
 
 }  // namespace fly_brain

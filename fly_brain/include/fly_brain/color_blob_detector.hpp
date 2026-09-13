@@ -18,6 +18,23 @@ namespace fly_brain {
 // buffer so fly_brain::PhototaxisController can run it without any
 // OpenCV/vision-library dependency (consistent with OpticFlowController's own
 // dependency-free `downsample_grayscale()`).
+//
+// Real-data check (2026-09-13, see NOTES.md's "## Post-M7" section):
+// checked whether this module could get the same real-connectome grounding
+// the optic-flow/haltere modules got above, and concluded honestly that it
+// shouldn't be forced. The real fly circuit this is loosely analogous to
+// (R7/R8 photoreceptors -> Dm8 -> Tm5/Tm9, well documented: Dm8 pools
+// 13-16 R7 inputs per Karuppudurai et al. 2014/Ramos-Traslosheros &
+// Silies 2021) is a SPECTRAL-OPPONENCY circuit - it compares "pale" vs
+// "yellow" ommatidia (different UV/blue-vs-green sensitivities) to
+// discriminate hue, on a UV-sensitive retina this project's RGB camera
+// can't replicate. This class does something categorically different:
+// template-matching a single fixed target RGB triple. Retrofitting a
+// "Dm8-inspired pooling radius" onto an RGB threshold would be a cosmetic
+// parallel, not a real grounding - the two circuits solve different
+// problems on different sensor hardware - so `min_pixels` below is left as
+// the honestly-labeled hand-tuned floor it always was, not given a fake
+// citation.
 struct ColorBlobResult {
   bool visible = false;
   // Normalized image coordinates of the matching-pixel centroid, in [-1, 1]:

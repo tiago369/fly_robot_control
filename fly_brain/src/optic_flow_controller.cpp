@@ -214,6 +214,39 @@ controller_interface::return_type OpticFlowController::update_and_write_commands
                         "vertical_drift=%.5f dt=%.4f",
                         est.yaw_rate, est.roll_drift, est.forward_drift, est.vertical_drift, dt);
 
+  // Named LPTC unit breakdown (see NOTES.md's "## Post-M7" section) - same
+  // low rate as the line above, kept separate so the primary estimate line
+  // stays grep-friendly for older log-parsing habits.
+  {
+    const auto& hs = emd_->hs_activity();
+    const auto& vs = emd_->vs_activity();
+    RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
+                          "optic flow LPTCs: HSN=%.5f HSE=%.5f HSS=%.5f | "
+                          "VS1=%.5f VS2=%.5f VS3=%.5f VS4=%.5f VS5=%.5f VS6=%.5f VS7=%.5f VS8=%.5f",
+                          hs[0], hs[1], hs[2], vs[0], vs[1], vs[2], vs[3], vs[4], vs[5], vs[6],
+                          vs[7]);
+
+    // Downstream descending-neuron (DN) analogs - TELEMETRY ONLY, not wired
+    // into any control path (DescendingFusionController's real optomotor
+    // gain multiplies est.roll_drift directly, untouched by this). Real
+    // FlyWire synapse-count evidence (see NOTES.md's "## Post-M7" section)
+    // found the HS family's strongest real downstream target among
+    // catalogued descending neurons is DNa02 (81 of 81 measured synapses
+    // from the HS family; DNa02 is a documented high-gain steering neuron -
+    // Rayshubskiy et al.), and the VS family's is DNp17 (657 of 658
+    // measured synapses from the VS family; DNp17 is documented to
+    // innervate wing/haltere neuropils - Feng et al. 2020). est.yaw_rate is
+    // this module's HS-population estimate and est.roll_drift its
+    // VS-population estimate (see lptc_pooling.hpp), so they are relabeled
+    // here with their real dominant downstream identity, unchanged
+    // numerically.
+    RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 500,
+                          "optic flow DN analogs (telemetry only): "
+                          "DNa02_analog(HS->real steering DN)=%.5f "
+                          "DNp17_analog(VS->real wing/haltere DN)=%.5f",
+                          est.yaw_rate, est.roll_drift);
+  }
+
   if (!yaw_rate_ref_->set_value(est.yaw_rate) || !roll_drift_ref_->set_value(est.roll_drift) ||
       !forward_drift_ref_->set_value(est.forward_drift) ||
       !vertical_drift_ref_->set_value(est.vertical_drift)) {

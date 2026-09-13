@@ -27,6 +27,23 @@ struct HaltereGains {
 // Haltere-analog: the fast (runs every physics/control step) reflex loop.
 // Outer attitude loop is P-only; the rate loop is the actual "haltere" reflex,
 // since real halteres primarily encode angular *rate* via Coriolis forces.
+//
+// Real-data check (2026-09-13, see NOTES.md's "## Post-M7" section): the
+// real haltere circuit lives in the ventral nerve cord, not the FAFB brain
+// connectome used for the LPTC/optic-flow work above, so it needed a
+// different public dataset - MANC (Male Adult Nerve Cord, Janelia FlyEM,
+// public CC-BY export, no account needed). Streaming the real 5.6GB neuron
+// table and 2.8GB connection table (24.5M and 42.8M rows respectively, both
+// scanned without a full in-memory load) found 435 real haltere-pathway
+// neurons (319 "haltere CS" = campaniform sensilla afferents, entering via
+// the real DMetaN nerve, 215/214 split almost exactly evenly left/right)
+// and exactly 6 real, named haltere motor neurons (MNhm03/MNhm42/MNhm43,
+// 2 each side) - with 238 real DIRECT sensory->motor synapse connections
+// (1727 total synapses) among them. That's a real, short, near-direct
+// reflex arc, not a deep multi-layer pipeline - genuine support for this
+// class's own fast/simple design (a proportional+derivative rate loop, no
+// intervening processing stages), though the actual gains here remain
+// hand-tuned, not derived from the real synapse weights above.
 class HaltereReflex {
 public:
   using Gains = HaltereGains;
